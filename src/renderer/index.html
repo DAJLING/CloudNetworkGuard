@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Claude Codex Network Guard</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header glass-panel">
+        <div class="brand-block">
+          <span class="product-kicker">Network Guard</span>
+          <h1>Claude / Codex 网络守卫</h1>
+          <p id="summary">正在读取守卫状态...</p>
+        </div>
+        <div class="header-actions">
+          <button id="checkNow" class="button secondary" type="button">立即检测</button>
+          <button id="guardToggle" class="button primary" type="button">开启守卫</button>
+        </div>
+      </header>
+
+      <nav class="tabs glass-panel" aria-label="主要视图">
+        <button class="tab is-active" type="button" data-view-tab="overview" aria-selected="true">总览</button>
+        <button class="tab" type="button" data-view-tab="targets" aria-selected="false">拦截目标</button>
+        <button class="tab" type="button" data-view-tab="activity" aria-selected="false">事件日志</button>
+      </nav>
+
+      <section id="view-overview" class="view is-active" data-view-panel="overview">
+        <section class="metrics-grid" id="statusBand" aria-label="当前状态">
+          <article class="metric-card glass-panel">
+            <span class="eyebrow">当前判断</span>
+            <strong id="verdict">UNKNOWN</strong>
+            <span id="checkedAt" class="metric-note">尚未检测</span>
+          </article>
+          <article class="metric-card glass-panel">
+            <span class="eyebrow">目标流量</span>
+            <strong id="traffic">未保护</strong>
+            <span class="metric-note">代理与防火墙联动</span>
+          </article>
+          <article class="metric-card glass-panel">
+            <span class="eyebrow">出口 IP</span>
+            <strong id="ip">未检测</strong>
+            <span id="region" class="metric-note">--</span>
+          </article>
+          <article class="metric-card glass-panel">
+            <span class="eyebrow">静态住宅 IP</span>
+            <strong id="staticIpMetric">未配置</strong>
+            <span id="staticIpMetricNote" class="metric-note">开启前需要确认</span>
+          </article>
+        </section>
+
+        <section class="content-grid overview-grid">
+          <article class="panel glass-panel detail-panel">
+            <div class="panel-title">
+              <div>
+                <span class="eyebrow">Check Matrix</span>
+                <h2>检测清单</h2>
+              </div>
+              <span id="risk" class="risk-pill">风险分 --</span>
+            </div>
+            <div id="checkItems" class="check-list" aria-live="polite"></div>
+          </article>
+
+          <aside class="side-stack">
+            <article class="panel glass-panel action-panel">
+              <div class="panel-title">
+                <div>
+                  <span class="eyebrow">Controls</span>
+                  <h2>快速操作</h2>
+                </div>
+              </div>
+              <label class="field">
+                <span>静态住宅 IP</span>
+                <input id="staticResidentialIp" type="text" inputmode="decimal" autocomplete="off" placeholder="例如 203.0.113.10" />
+                <small id="staticIpHelp">填写 0.0.0.0 表示跳过静态 IP 校验。</small>
+              </label>
+              <button id="saveStaticIp" class="button secondary wide" type="button">保存静态 IP</button>
+              <label class="switch-row">
+                <span>
+                  <strong>开机自启</strong>
+                  <small>启动后恢复上次守卫状态</small>
+                </span>
+                <input id="launchAtLogin" type="checkbox" />
+              </label>
+              <div class="proxy-box">
+                <span class="eyebrow">本地代理</span>
+                <code id="proxy">127.0.0.1:18089</code>
+              </div>
+            </article>
+
+            <article class="panel glass-panel target-summary">
+              <div class="panel-title compact">
+                <div>
+                  <span class="eyebrow">Targets</span>
+                  <h2>拦截配置</h2>
+                </div>
+                <strong id="targetCount" class="count-pill">0</strong>
+              </div>
+              <div class="config-lines">
+                <div>
+                  <span>配置文件</span>
+                  <code id="targetConfigPath">--</code>
+                </div>
+                <div>
+                  <span>载入状态</span>
+                  <strong id="configStatus">--</strong>
+                </div>
+              </div>
+            </article>
+          </aside>
+        </section>
+      </section>
+
+      <section id="view-targets" class="view" data-view-panel="targets" hidden>
+        <section class="content-grid targets-grid">
+          <article class="panel glass-panel target-panel">
+            <div class="panel-title">
+              <div>
+                <span class="eyebrow">Rules</span>
+                <h2>拦截目标</h2>
+              </div>
+              <button id="reloadRules" class="button secondary" type="button">重新载入配置</button>
+            </div>
+            <div id="configError" class="callout" hidden></div>
+            <div id="targetRules" class="target-list"></div>
+          </article>
+
+          <aside class="side-stack">
+            <article class="panel glass-panel">
+              <div class="panel-title compact">
+                <div>
+                  <span class="eyebrow">Health</span>
+                  <h2>检测目标</h2>
+                </div>
+              </div>
+              <div id="healthHosts" class="chip-list"></div>
+            </article>
+            <article class="panel glass-panel">
+              <div class="panel-title compact">
+                <div>
+                  <span class="eyebrow">Control</span>
+                  <h2>强校验目标</h2>
+                </div>
+              </div>
+              <div id="controlHosts" class="chip-list"></div>
+            </article>
+            <article class="panel glass-panel">
+              <div class="panel-title compact">
+                <div>
+                  <span class="eyebrow">Firewall</span>
+                  <h2>防火墙目标</h2>
+                </div>
+              </div>
+              <div id="firewallHosts" class="chip-list"></div>
+            </article>
+          </aside>
+        </section>
+      </section>
+
+      <section id="view-activity" class="view" data-view-panel="activity" hidden>
+        <article class="panel glass-panel">
+          <div class="panel-title">
+            <div>
+              <span class="eyebrow">Activity</span>
+              <h2>事件日志</h2>
+            </div>
+            <span>本地最小日志</span>
+          </div>
+          <div id="logs" class="logs"></div>
+        </article>
+      </section>
+    </main>
+
+    <div id="staticIpDialog" class="modal-backdrop" hidden>
+      <section class="modal glass-panel" role="dialog" aria-modal="true" aria-labelledby="staticIpDialogTitle">
+        <div class="panel-title">
+          <div>
+            <span class="eyebrow">Required Setup</span>
+            <h2 id="staticIpDialogTitle">需要配置静态住宅 IP</h2>
+          </div>
+        </div>
+        <p>开启守卫前需要确认当前出口静态住宅 IP。你可以填写真实 IP 后继续，或明确选择跳过校验。</p>
+        <label class="field">
+          <span>静态住宅 IP</span>
+          <input id="staticIpDialogInput" type="text" inputmode="decimal" autocomplete="off" placeholder="例如 203.0.113.10" />
+          <small id="staticIpDialogError">填写 0.0.0.0 表示不校验。</small>
+        </label>
+        <div class="modal-actions">
+          <button id="cancelStaticIp" class="button secondary" type="button">取消</button>
+          <button id="skipStaticIp" class="button secondary" type="button">不校验并开启</button>
+          <button id="confirmStaticIp" class="button primary" type="button">保存并开启</button>
+        </div>
+      </section>
+    </div>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>

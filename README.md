@@ -9,12 +9,35 @@ The app provides a one-click guard switch. When enabled, target traffic is route
 - Claude web reachability probe for `https://claude.ai/`
 - Free-source IP classification and proxy/VPN/datacenter risk checks
 - Mainland China, Hong Kong, Macau, and unknown-region blocking
-- Local 24-hour static IP observation window
+- Configurable static residential IP preflight, with `0.0.0.0` as an explicit skip value
 - Browser/system environment consistency checks for blocked time zones, languages, and WebRTC local IP exposure
 - Exit IP binding and mismatch alerts
 - Target request rate monitoring
 - Firewall fallback blocking for direct clients that do not honor system proxy settings
 - Minimal local logging with masked IP data only
+
+## Target Configuration
+
+Guarded Claude/Codex targets are loaded from an editable JSON file named `target-rules.json` in the app data directory. Set `NETWORK_GUARD_TARGET_CONFIG` to point at another file.
+
+On first run the app writes the default Claude, Anthropic, OpenAI, and ChatGPT rules. Edit the `rules` array to add or remove guarded domains or full URLs, then use "重新载入配置" in the app.
+
+`staticResidentialIp` may be edited in the app or in this file. Leave it empty to require setup before enabling the guard, set it to a real static residential IPv4 address to compare against the current exit IP, or set it to `0.0.0.0` to skip only the static IP check.
+
+```json
+{
+  "version": 1,
+  "rules": [
+    { "id": "claude-web", "domainPattern": "claude.ai", "action": "GUARD" },
+    { "id": "codex-openai-api", "domainPattern": "https://api.openai.com/v1", "action": "GUARD" }
+  ],
+  "healthCheckHosts": ["claude.ai", "api.openai.com"],
+  "controlHosts": ["claude.ai"],
+  "firewallHosts": ["claude.ai", "api.openai.com"],
+  "webProbeUrl": "https://claude.ai/",
+  "staticResidentialIp": ""
+}
+```
 
 ## Commands
 
@@ -35,7 +58,7 @@ npm.cmd run dist:msi
 - Guard disabled: target traffic is allowed and no block notification is shown.
 - Guard enabled: the app temporarily blocks target traffic while checking, then releases firewall/hosts blocks only if validation passes.
 - Direct clients: when the verdict blocks traffic, Windows firewall rules are added for resolved target IPs so CLI tools that bypass the system proxy are also blocked.
-- First run or IP change: the app enters `OBSERVING` until the same masked IP has remained stable for 24 hours.
+- First run: the app requires a static residential IP value before enabling the guard unless the user explicitly saves `0.0.0.0` to skip that specific check.
 - Exit IP binding: the first detected exit IP is locally bound by hash; later changes are blocked until state is reset.
 - Claude control check: DNS, TCP, TLS, and Claude web probe failures block guarded traffic.
 - Usage rate check: unusually high target request volume blocks guarded traffic.

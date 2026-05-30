@@ -3,7 +3,14 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { TargetConfigManager, deriveHostsFromRules, normalizeStaticResidentialIp, normalizeTargetConfig } = require('../src/daemon/target-config');
+const {
+  TargetConfigManager,
+  deriveHostsFromRules,
+  normalizeStaticResidentialIp,
+  normalizeTargetConfig,
+  resolveValidationHosts,
+  defaultValidation
+} = require('../src/daemon/target-config');
 
 test('TargetConfigManager writes a default editable config file', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-targets-'));
@@ -61,6 +68,65 @@ test('TargetConfigManager validates and saves static residential IP', () => {
   assert.equal(manager.setStaticResidentialIp('203.0.113.10').staticResidentialIp, '203.0.113.10');
   assert.equal(manager.setStaticResidentialIp('0.0.0.0').staticResidentialIp, '0.0.0.0');
   assert.throws(() => manager.setStaticResidentialIp('999.1.1.1'), /INVALID_STATIC_RESIDENTIAL_IP/);
+});
+
+test('resolveValidationHosts supports Claude-only validation', () => {
+  const resolved = resolveValidationHosts({
+    services: { claude: true, codex: false },
+    webProbe: { enabled: true, url: 'https://claude.ai/' },
+    useCustomHosts: false
+  });
+
+  assert.deepEqual(resolved.healthCheckHosts, ['claude.ai', 'api.anthropic.com']);
+  assert.deepEqual(resolved.controlHosts, ['claude.ai', 'api.anthropic.com']);
+  assert.equal(resolved.webProbeUrl, 'https://claude.ai/');
+});
+
+test('resolveValidationHosts supports Codex-only validation without web probe', () => {
+  const resolved = resolveValidationHosts({
+    services: { claude: false, codex: true },
+    webProbe: { enabled: true, url: 'https://claude.ai/' },
+    useCustomHosts: false
+  });
+
+  assert.deepEqual(resolved.healthCheckHosts, ['api.openai.com', 'chat.openai.com', 'auth.openai.com']);
+  assert.deepEqual(resolved.controlHosts, ['api.openai.com']);
+  assert.equal(resolved.webProbeUrl, null);
+});
+
+test('TargetConfigManager saves and resets validation config', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-targets-'));
+  const filePath = path.join(tmp, 'target-rules.json');
+  const manager = new TargetConfigManager({ filePath });
+  manager.load();
+
+  const saved = manager.saveValidation({
+    services: { claude: true, codex: false },
+    webProbe: { enabled: true, url: 'https://claude.ai/' },
+    useCustomHosts: false
+  });
+  assert.equal(saved.validation.services.codex, false);
+  assert.deepEqual(saved.healthCheckHosts, ['claude.ai', 'api.anthropic.com']);
+
+  const reset = manager.resetValidationToDefaults();
+  assert.deepEqual(reset.validation.services, defaultValidation().services);
+  assert.equal(reset.healthCheckHosts.includes('api.openai.com'), true);
+});
+
+test('TargetConfigManager resetToDefaults restores factory target config', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-targets-'));
+  const filePath = path.join(tmp, 'target-rules.json');
+  const manager = new TargetConfigManager({ filePath });
+  manager.saveValidation({
+    services: { claude: true, codex: false },
+    webProbe: { enabled: false, url: '' },
+    useCustomHosts: false
+  });
+
+  const reset = manager.resetToDefaults();
+  assert.equal(reset.validation.services.claude, true);
+  assert.equal(reset.validation.services.codex, true);
+  assert.equal(reset.rules.some((rule) => rule.domainPattern === 'api.openai.com'), true);
 });
 
 test('normalizeStaticResidentialIp supports empty values for first-run setup', () => {

@@ -21,3 +21,17 @@ test('probeClaudeWeb blocks forbidden responses', async () => {
   assert.equal(result.verdict, NetworkVerdict.BLOCK);
   assert.equal(result.reasons.includes(CheckReason.CLAUDE_WEB_CHECK_FAILED), true);
 });
+
+test('probeClaudeWeb treats Cloudflare browser challenges as reachable', async () => {
+  const result = await probeClaudeWeb(async () => ({
+    status: 403,
+    headers: {
+      get: (name) => (name.toLowerCase() === 'cf-mitigated' ? 'challenge' : null)
+    }
+  }));
+
+  assert.equal(result.verdict, NetworkVerdict.PASS);
+  assert.deepEqual(result.reasons, []);
+  assert.equal(result.status, 403);
+  assert.equal(result.challenge, 'cloudflare');
+});

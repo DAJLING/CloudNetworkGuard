@@ -99,6 +99,25 @@ dl {
   padding: 22px;
 }
 
+.brand-lockup {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  min-width: 0;
+}
+
+.brand-icon {
+  width: 64px;
+  height: 64px;
+  flex: 0 0 auto;
+  border-radius: 16px;
+  box-shadow: 0 14px 34px rgba(16, 32, 27, 0.16);
+}
+
+.brand-block {
+  min-width: 0;
+}
+
 .product-kicker,
 .eyebrow {
   color: var(--muted);
@@ -426,6 +445,148 @@ input:focus-visible {
   font-size: 13px;
 }
 
+.restore-box {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  border: 1px solid rgba(180, 35, 24, 0.18);
+  border-radius: var(--radius);
+  padding: 14px;
+  background: rgba(255, 232, 228, 0.46);
+}
+
+.restore-box strong,
+.restore-box small {
+  display: block;
+}
+
+.restore-box small {
+  color: var(--muted);
+}
+
+.consistency-box {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.consistency-box strong,
+.consistency-box small {
+  display: block;
+}
+
+.consistency-box small {
+  color: var(--muted);
+}
+
+.validation-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.field-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.validation-options {
+  display: grid;
+  gap: 8px;
+}
+
+.validation-panel .toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.validation-panel .field-label {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.validation-panel .text-input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font: inherit;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.validation-panel .code-input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.86rem;
+  resize: vertical;
+}
+
+.validation-custom-fields {
+  display: grid;
+  gap: 8px;
+}
+
+.validation-panel .button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.field.compact {
+  gap: 6px;
+}
+
+.switch-row.compact {
+  margin-top: -4px;
+}
+
+.binding-box {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.binding-box strong,
+.binding-box small {
+  display: block;
+}
+
+.binding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.fix-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.fix-copy strong {
+  display: block;
+  font-size: 18px;
+}
+
+.fix-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 input[type="checkbox"] {
   justify-self: end;
   width: 48px;
@@ -669,6 +830,19 @@ code {
   display: none;
 }
 
+.diagnostic-report {
+  max-height: 520px;
+  margin: 16px 0 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  background: rgba(16, 32, 27, 0.88);
+  color: #e8fff6;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
 .modal {
   width: min(520px, 100%);
   border-radius: var(--radius);
@@ -677,6 +851,26 @@ code {
 
 .modal .field {
   margin-top: 18px;
+}
+
+.setup-modal {
+  max-width: 620px;
+}
+
+.setup-choice {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.setup-choice label {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.62);
 }
 
 .modal-actions {
@@ -731,6 +925,17 @@ code {
 
   .app-header {
     padding: 18px;
+  }
+
+  .brand-lockup {
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .brand-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
   }
 
   h1 {

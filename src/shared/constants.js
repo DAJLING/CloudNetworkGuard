@@ -57,6 +57,23 @@ const DEFAULT_TARGET_HEALTH_HOSTS = ['claude.ai', 'api.openai.com', 'api.anthrop
 const DEFAULT_TARGET_CONTROL_HOSTS = ['claude.ai', 'api.anthropic.com'];
 const DEFAULT_TARGET_WEB_PROBE_URL = 'https://claude.ai/';
 
+const VALIDATION_SERVICES = Object.freeze({
+  claude: Object.freeze({
+    id: 'claude',
+    label: 'Claude / Anthropic',
+    healthCheckHosts: ['claude.ai', 'api.anthropic.com'],
+    controlHosts: ['claude.ai', 'api.anthropic.com'],
+    defaultWebProbeUrl: DEFAULT_TARGET_WEB_PROBE_URL
+  }),
+  codex: Object.freeze({
+    id: 'codex',
+    label: 'Codex / OpenAI',
+    healthCheckHosts: ['api.openai.com', 'chat.openai.com', 'auth.openai.com'],
+    controlHosts: ['api.openai.com'],
+    defaultWebProbeUrl: null
+  })
+});
+
 module.exports = {
   GuardState,
   GuardMode,
@@ -65,5 +82,6 @@ module.exports = {
   DEFAULT_TARGET_RULES,
   DEFAULT_TARGET_HEALTH_HOSTS,
   DEFAULT_TARGET_CONTROL_HOSTS,
-  DEFAULT_TARGET_WEB_PROBE_URL
+  DEFAULT_TARGET_WEB_PROBE_URL,
+  VALIDATION_SERVICES
 };

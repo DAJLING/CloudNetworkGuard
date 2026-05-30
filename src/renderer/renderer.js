@@ -4,6 +4,17 @@ const els = {
   checkNow: document.querySelector('#checkNow'),
   reloadRules: document.querySelector('#reloadRules'),
   saveStaticIp: document.querySelector('#saveStaticIp'),
+  emergencyRestore: document.querySelector('#emergencyRestore'),
+  recoveryStatus: document.querySelector('#recoveryStatus'),
+  bindingStatus: document.querySelector('#bindingStatus'),
+  bindingHelp: document.querySelector('#bindingHelp'),
+  resetBinding: document.querySelector('#resetBinding'),
+  rebindCurrentExit: document.querySelector('#rebindCurrentExit'),
+  setupWizard: document.querySelector('#setupWizard'),
+  completeSetup: document.querySelector('#completeSetup'),
+  reopenSetup: document.querySelector('#reopenSetup'),
+  diagnosticReport: document.querySelector('#diagnosticReport'),
+  copyReport: document.querySelector('#copyReport'),
   statusBand: document.querySelector('#statusBand'),
   verdict: document.querySelector('#verdict'),
   traffic: document.querySelector('#traffic'),
@@ -13,6 +24,9 @@ const els = {
   region: document.querySelector('#region'),
   staticIpMetric: document.querySelector('#staticIpMetric'),
   staticIpMetricNote: document.querySelector('#staticIpMetricNote'),
+  fixTitle: document.querySelector('#fixTitle'),
+  fixExplanation: document.querySelector('#fixExplanation'),
+  fixActions: document.querySelector('#fixActions'),
   staticResidentialIp: document.querySelector('#staticResidentialIp'),
   staticIpHelp: document.querySelector('#staticIpHelp'),
   launchAtLogin: document.querySelector('#launchAtLogin'),
@@ -25,6 +39,18 @@ const els = {
   healthHosts: document.querySelector('#healthHosts'),
   controlHosts: document.querySelector('#controlHosts'),
   firewallHosts: document.querySelector('#firewallHosts'),
+  validationClaude: document.querySelector('#validationClaude'),
+  validationCodex: document.querySelector('#validationCodex'),
+  validationWebProbe: document.querySelector('#validationWebProbe'),
+  validationWebProbeUrl: document.querySelector('#validationWebProbeUrl'),
+  validationCustomHosts: document.querySelector('#validationCustomHosts'),
+  validationCustomFields: document.querySelector('#validationCustomFields'),
+  validationHealthHosts: document.querySelector('#validationHealthHosts'),
+  validationControlHosts: document.querySelector('#validationControlHosts'),
+  validationStatus: document.querySelector('#validationStatus'),
+  saveValidation: document.querySelector('#saveValidation'),
+  resetValidationDefaults: document.querySelector('#resetValidationDefaults'),
+  resetTargetConfigDefaults: document.querySelector('#resetTargetConfigDefaults'),
   checkItems: document.querySelector('#checkItems'),
   logs: document.querySelector('#logs'),
   staticIpDialog: document.querySelector('#staticIpDialog'),
@@ -32,7 +58,18 @@ const els = {
   staticIpDialogError: document.querySelector('#staticIpDialogError'),
   confirmStaticIp: document.querySelector('#confirmStaticIp'),
   skipStaticIp: document.querySelector('#skipStaticIp'),
-  cancelStaticIp: document.querySelector('#cancelStaticIp')
+  cancelStaticIp: document.querySelector('#cancelStaticIp'),
+  environmentConsistencySummary: document.querySelector('#environmentConsistencySummary'),
+  environmentConsistencyTarget: document.querySelector('#environmentConsistencyTarget'),
+  environmentConsistencyToggle: document.querySelector('#environmentConsistencyToggle'),
+  deriveFromExitIp: document.querySelector('#deriveFromExitIp'),
+  keepChineseInput: document.querySelector('#keepChineseInput'),
+  profileOverrideTimeZone: document.querySelector('#profileOverrideTimeZone'),
+  profileOverrideLanguage: document.querySelector('#profileOverrideLanguage'),
+  applyEnvironmentConsistency: document.querySelector('#applyEnvironmentConsistency'),
+  restoreEnvironmentConsistency: document.querySelector('#restoreEnvironmentConsistency'),
+  backupEnvironmentNow: document.querySelector('#backupEnvironmentNow'),
+  environmentConsistencyStatus: document.querySelector('#environmentConsistencyStatus')
 };
 
 let currentStatus = null;
@@ -119,7 +156,11 @@ async function collectWebRtcLocalIpCount() {
 
   return new Promise((resolve) => {
     const ips = new Set();
-    const pc = new RTCPeerConnection({ iceServers: [] });
+    const pc = new RTCPeerConnection({
+      iceServers: [],
+      iceTransportPolicy: 'relay',
+      bundlePolicy: 'max-bundle'
+    });
     const timeout = setTimeout(() => {
       pc.close();
       resolve(ips.size);
@@ -150,19 +191,75 @@ async function collectWebRtcLocalIpCount() {
 }
 
 async function reportEnvironment() {
+  let trustConsistencyWebRtc = false;
+  let trustConsistencyLanguage = false;
+  let keepChineseInput = true;
+  let consistencyActive = false;
+  let consistency = {};
+  try {
+    const status = await window.networkGuard.getStatus();
+    consistency = status.environmentConsistency || {};
+    consistencyActive =
+      consistency.enabled === true && consistency.lastApplyResult && consistency.lastApplyResult.ok === true;
+    keepChineseInput = consistency.keepChineseInput !== false;
+    trustConsistencyWebRtc = consistencyActive;
+    trustConsistencyLanguage = keepChineseInput;
+  } catch {
+    trustConsistencyWebRtc = false;
+    trustConsistencyLanguage = false;
+  }
+
+  let language = navigator.language;
+  let languages = Array.from(navigator.languages || []);
+  if (
+    consistencyActive &&
+    !keepChineseInput &&
+    consistency.lastTargetProfile &&
+    consistency.lastTargetProfile.language
+  ) {
+    language = consistency.lastTargetProfile.language;
+    languages =
+      consistency.lastTargetProfile.languages && consistency.lastTargetProfile.languages.length
+        ? consistency.lastTargetProfile.languages
+        : [consistency.lastTargetProfile.language];
+  }
+
   const environment = {
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    language: navigator.language,
-    languages: Array.from(navigator.languages || []),
+    language,
+    languages,
     platform: navigator.platform,
     userAgent: navigator.userAgent,
-    webRtcLocalIpCount: await collectWebRtcLocalIpCount()
+    webRtcLocalIpCount: await collectWebRtcLocalIpCount(),
+    trustConsistencyWebRtc,
+    trustConsistencyLanguage,
+    keepChineseInput
   };
   await window.networkGuard.reportEnvironment(environment);
 }
 
 function setBusy(isBusy) {
-  for (const button of [els.guardToggle, els.checkNow, els.reloadRules, els.saveStaticIp, els.confirmStaticIp, els.skipStaticIp]) {
+  for (const button of [
+    els.guardToggle,
+    els.checkNow,
+    els.reloadRules,
+    els.saveStaticIp,
+    els.emergencyRestore,
+    els.resetBinding,
+    els.rebindCurrentExit,
+    els.completeSetup,
+    els.reopenSetup,
+    els.copyReport,
+    els.confirmStaticIp,
+    els.skipStaticIp,
+    els.applyEnvironmentConsistency,
+    els.restoreEnvironmentConsistency,
+    els.backupEnvironmentNow,
+    els.environmentConsistencyToggle,
+    els.saveValidation,
+    els.resetValidationDefaults,
+    els.resetTargetConfigDefaults
+  ]) {
     if (button) button.disabled = isBusy;
   }
 }
@@ -232,6 +329,96 @@ function renderTargets(config = {}) {
   renderChipList(els.healthHosts, config.healthCheckHosts || []);
   renderChipList(els.controlHosts, config.controlHosts || []);
   renderChipList(els.firewallHosts, config.firewallHosts || []);
+  renderValidationEditor(config.validation || {}, config);
+}
+
+function hostsToTextarea(hosts = []) {
+  return (hosts || []).join('\n');
+}
+
+function parseHostLines(value) {
+  return String(value || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function updateValidationEditorState() {
+  if (!els.validationCustomFields) return;
+  const custom = Boolean(els.validationCustomHosts && els.validationCustomHosts.checked);
+  els.validationCustomFields.hidden = !custom;
+
+  const claudeEnabled = Boolean(els.validationClaude && els.validationClaude.checked);
+  const webProbeEnabled = Boolean(els.validationWebProbe && els.validationWebProbe.checked);
+  if (els.validationWebProbe) {
+    els.validationWebProbe.disabled = !claudeEnabled;
+    if (!claudeEnabled) els.validationWebProbe.checked = false;
+  }
+  if (els.validationWebProbeUrl) {
+    els.validationWebProbeUrl.disabled = !claudeEnabled || !webProbeEnabled;
+  }
+}
+
+function renderValidationEditor(validation = {}, config = {}) {
+  if (!els.validationClaude) return;
+
+  const services = validation.services || {};
+  els.validationClaude.checked = services.claude !== false;
+  els.validationCodex.checked = services.codex !== false;
+
+  const webProbe = validation.webProbe || {};
+  els.validationWebProbe.checked = webProbe.enabled !== false && Boolean(config.webProbeUrl || webProbe.url);
+  els.validationWebProbeUrl.value = config.webProbeUrl || webProbe.url || 'https://claude.ai/';
+
+  els.validationCustomHosts.checked = validation.useCustomHosts === true;
+  els.validationHealthHosts.value = hostsToTextarea(
+    validation.customHealthCheckHosts && validation.customHealthCheckHosts.length
+      ? validation.customHealthCheckHosts
+      : config.healthCheckHosts
+  );
+  els.validationControlHosts.value = hostsToTextarea(
+    validation.customControlHosts && validation.customControlHosts.length
+      ? validation.customControlHosts
+      : config.controlHosts
+  );
+
+  if (config.validationError) {
+    els.validationStatus.textContent = `校验配置无效，已回退默认：${config.validationError}`;
+    els.validationStatus.className = 'field-message error';
+  } else {
+    els.validationStatus.textContent = validation.useCustomHosts
+      ? '当前使用自定义主机列表。'
+      : `当前预设：${services.claude !== false ? 'Claude' : ''}${services.claude !== false && services.codex !== false ? ' + ' : ''}${services.codex !== false ? 'Codex' : ''}`;
+    els.validationStatus.className = 'field-message';
+  }
+
+  updateValidationEditorState();
+}
+
+function readValidationInputFromForm() {
+  const claude = Boolean(els.validationClaude && els.validationClaude.checked);
+  const codex = Boolean(els.validationCodex && els.validationCodex.checked);
+  if (!claude && !codex) {
+    throw new Error('请至少启用 Claude 或 Codex/OpenAI 其中一项校验。');
+  }
+
+  const useCustomHosts = Boolean(els.validationCustomHosts && els.validationCustomHosts.checked);
+  const customHealthCheckHosts = parseHostLines(els.validationHealthHosts && els.validationHealthHosts.value);
+  const customControlHosts = parseHostLines(els.validationControlHosts && els.validationControlHosts.value);
+  if (useCustomHosts && !customHealthCheckHosts.length) {
+    throw new Error('自定义模式下请填写至少一个检测目标主机。');
+  }
+
+  return {
+    services: { claude, codex },
+    webProbe: {
+      enabled: Boolean(els.validationWebProbe && els.validationWebProbe.checked),
+      url: String(els.validationWebProbeUrl && els.validationWebProbeUrl.value || '').trim()
+    },
+    useCustomHosts,
+    customHealthCheckHosts,
+    customControlHosts
+  };
 }
 
 function renderCheckItems(items = []) {
@@ -281,6 +468,186 @@ function renderLogs(logs = []) {
     .join('');
 }
 
+function renderRecovery(recovery = {}) {
+  if (!els.recoveryStatus) return;
+  const result = recovery.lastResult;
+  if (!result) {
+    els.recoveryStatus.textContent = '尚未执行恢复。';
+    els.recoveryStatus.className = 'field-message';
+    return;
+  }
+
+  if (result.ok) {
+    els.recoveryStatus.textContent = '网络恢复完成：守卫已关闭，代理和拦截规则已清理。';
+    els.recoveryStatus.className = 'field-message success';
+    return;
+  }
+
+  const failedLayers = Object.entries(result.steps || {})
+    .filter(([, step]) => step && step.ok === false)
+    .map(([name, step]) => `${name}: ${step.error || '失败'}`);
+  els.recoveryStatus.textContent = `部分恢复失败：${failedLayers.join('；') || '请查看日志'}`;
+  els.recoveryStatus.className = 'field-message error';
+}
+
+function runGuidanceAction(actionId) {
+  if (actionId === 'retry-check') {
+    els.checkNow.click();
+  } else if (actionId === 'restore-network') {
+    els.emergencyRestore.click();
+  } else if (actionId === 'fix-environment') {
+    els.applyEnvironmentConsistency.click();
+  } else if (actionId === 'configure-static-ip' || actionId === 'skip-static-ip') {
+    openStaticIpDialog();
+  } else if (actionId === 'view-report' || actionId === 'review-binding') {
+    setActiveView('report');
+  }
+}
+
+function formatConsistencySteps(steps = {}) {
+  const failed = Object.entries(steps)
+    .filter(([, step]) => step && step.ok === false)
+    .map(([name, step]) => `${name}: ${step.error || '失败'}`);
+  return failed;
+}
+
+function renderEnvironmentConsistency(consistency = {}) {
+  if (!els.environmentConsistencySummary) return;
+
+  const supported = consistency.supported !== false;
+  const enabled = Boolean(consistency.enabled);
+  const backup = consistency.backup || {};
+  const profile = consistency.lastTargetProfile;
+
+  if (!supported) {
+    els.environmentConsistencySummary.textContent = '当前平台暂不支持自动对齐（仅 Windows）。';
+    els.environmentConsistencyToggle.disabled = true;
+    els.applyEnvironmentConsistency.disabled = true;
+    return;
+  }
+
+  els.environmentConsistencyToggle.disabled = false;
+  els.environmentConsistencyToggle.checked = enabled;
+  els.deriveFromExitIp.checked = consistency.deriveFromExitIp !== false;
+  if (els.keepChineseInput) els.keepChineseInput.checked = consistency.keepChineseInput !== false;
+  els.profileOverrideTimeZone.value = consistency.profileOverride?.timeZone || '';
+  els.profileOverrideLanguage.value = consistency.profileOverride?.language || '';
+
+  if (profile) {
+    els.environmentConsistencyTarget.textContent = `目标：${profile.timeZone} / ${profile.language}`;
+    els.environmentConsistencySummary.textContent = enabled
+      ? '已启用环境对齐，与出口姿态一致。'
+      : `已计算目标环境：${profile.timeZone} / ${profile.language}`;
+  } else if (consistency.deriveFromExitIp !== false) {
+    els.environmentConsistencyTarget.textContent = '跟随出口 IP';
+    els.environmentConsistencySummary.textContent = enabled ? '已启用环境对齐' : '尚未对齐环境';
+  } else {
+    els.environmentConsistencyTarget.textContent = '使用手动目标配置';
+    els.environmentConsistencySummary.textContent = enabled ? '已启用手动对齐' : '尚未对齐环境';
+  }
+
+  if (backup.hasBackup && backup.createdAt) {
+    els.environmentConsistencySummary.textContent += ` · 已备份 ${formatDate(backup.createdAt)}`;
+  }
+
+  const applyResult = consistency.lastApplyResult;
+  const restoreResult = consistency.lastRestoreResult;
+  if (!els.environmentConsistencyStatus) return;
+
+  if (restoreResult) {
+    if (restoreResult.ok) {
+      els.environmentConsistencyStatus.textContent = '原始环境已还原，应用将重启以生效。';
+      els.environmentConsistencyStatus.className = 'field-message success';
+    } else {
+      const failed = formatConsistencySteps(restoreResult.steps);
+      els.environmentConsistencyStatus.textContent = `还原未完全成功：${failed.join('；') || '请查看日志'}`;
+      els.environmentConsistencyStatus.className = 'field-message error';
+    }
+    return;
+  }
+
+  if (applyResult) {
+    if (applyResult.ok) {
+      els.environmentConsistencyStatus.textContent =
+        '环境对齐完成。若重启后检测仍失败，请注销 Windows 并确认 Chrome/Edge 已关闭后再试。';
+      els.environmentConsistencyStatus.className = 'field-message success';
+    } else {
+      const failed = formatConsistencySteps(applyResult.steps);
+      const browserRunning = applyResult.steps?.preflight?.error === 'BROWSER_RUNNING';
+      els.environmentConsistencyStatus.textContent = browserRunning
+        ? '请先完全关闭 Chrome 和 Edge，再重试一键对齐。'
+        : `对齐未完全成功：${failed.join('；') || '请查看日志'}`;
+      els.environmentConsistencyStatus.className = 'field-message error';
+    }
+    return;
+  }
+
+  els.environmentConsistencyStatus.textContent = '尚未执行环境对齐。';
+  els.environmentConsistencyStatus.className = 'field-message';
+}
+
+async function persistEnvironmentConsistencyConfig() {
+  return window.networkGuard.setEnvironmentConsistencyConfig({
+    deriveFromExitIp: els.deriveFromExitIp.checked,
+    keepChineseInput: els.keepChineseInput ? els.keepChineseInput.checked : true,
+    profileOverride: {
+      timeZone: els.profileOverrideTimeZone.value.trim(),
+      language: els.profileOverrideLanguage.value.trim()
+    }
+  });
+}
+
+async function runPostApplyCheck() {
+  await reportEnvironment();
+  await window.networkGuard.checkNow();
+  await refresh();
+}
+
+function renderGuidance(guidance = {}) {
+  if (!els.fixTitle || !els.fixExplanation || !els.fixActions) return;
+  els.fixTitle.textContent = guidance.title || '等待检测结果';
+  els.fixExplanation.textContent = guidance.explanation || '检测完成后会显示最重要的阻断原因和下一步建议。';
+  els.fixActions.innerHTML = '';
+
+  for (const action of guidance.actions || []) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = action.tone === 'primary' ? 'button primary' : 'button secondary';
+    button.textContent = action.label;
+    button.addEventListener('click', () => runGuidanceAction(action.id));
+    els.fixActions.appendChild(button);
+  }
+}
+
+function renderBinding(binding = {}) {
+  if (!els.bindingStatus || !els.bindingHelp) return;
+  const maskedIp = binding.currentMaskedIp || '未检测';
+  els.bindingStatus.textContent = binding.bound ? `已绑定出口，最近出口：${maskedIp}` : `尚未绑定出口，最近出口：${maskedIp}`;
+  if (binding.mismatch) {
+    els.bindingHelp.textContent = '当前出口与绑定指纹不一致，请确认网络后重置或重新绑定。';
+    els.bindingHelp.className = 'field-message error';
+  } else {
+    els.bindingHelp.textContent = '只保存出口 IP 指纹，不显示完整 IP。';
+    els.bindingHelp.className = 'field-message';
+  }
+}
+
+function selectedSetupStrategy() {
+  const selected = document.querySelector('input[name="setupStaticIpStrategy"]:checked');
+  return selected ? selected.value : 'manual';
+}
+
+function renderSetup(setup = {}) {
+  if (!els.setupWizard) return;
+  els.setupWizard.hidden = Boolean(setup.completed);
+}
+
+async function renderDiagnosticReport() {
+  if (!els.diagnosticReport) return;
+  const report = await window.networkGuard.getDiagnosticReport();
+  els.diagnosticReport.textContent = JSON.stringify(report, null, 2);
+}
+
 function renderStaticIp(config = {}) {
   const value = config.staticResidentialIp || '';
   if (document.activeElement !== els.staticResidentialIp) {
@@ -322,13 +689,24 @@ function render(status) {
   els.checkedAt.textContent = check ? formatDate(check.checkedAt) : '尚未检测';
   els.region.textContent = ip.countryCode ? `${ip.countryCode} / ${ip.regionName || 'unknown'}` : '--';
   els.launchAtLogin.checked = Boolean(status.launchAtLogin);
-  els.proxy.textContent = `${status.proxy.host}:${status.proxy.port}`;
+  const proxy = status.proxy || {};
+  els.proxy.textContent =
+    proxy.systemApplied === true
+      ? `${proxy.host}:${proxy.port}（系统代理）`
+      : proxy.mode === 'FIREWALL_ONLY'
+        ? `${proxy.host}:${proxy.port}（仅防火墙，不改系统代理）`
+        : `${proxy.host}:${proxy.port}`;
 
   els.statusBand.className = `metrics-grid ${String(displayVerdict).toLowerCase()}`;
   renderStaticIp(status.targetConfig || {});
   renderTargets(status.targetConfig || {});
   renderCheckItems(check && Array.isArray(check.checkItems) ? check.checkItems : []);
   renderLogs(status.logs);
+  renderRecovery(status.recovery || {});
+  renderGuidance(status.guidance || {});
+  renderBinding(status.binding || {});
+  renderEnvironmentConsistency(status.environmentConsistency || {});
+  renderSetup(status.setup || {});
 }
 
 async function refresh() {
@@ -346,6 +724,12 @@ function setActiveView(viewName) {
     const active = panel.dataset.viewPanel === viewName;
     panel.classList.toggle('is-active', active);
     panel.hidden = !active;
+  }
+
+  if (viewName === 'report') {
+    renderDiagnosticReport().catch(() => {
+      els.diagnosticReport.textContent = '无法生成检测报告。';
+    });
   }
 }
 
@@ -369,8 +753,12 @@ async function saveStaticIp(value, { allowEmpty = true } = {}) {
 async function enableGuardWithStaticIpHandling() {
   setBusy(true);
   try {
+    await reportEnvironment();
     const status = await window.networkGuard.enable('AUTO');
     render(status);
+    if (status.guardState !== 'ENABLED' && status.lastCheck && status.lastCheck.allowTargetTraffic !== true) {
+      setHelp('开启守卫前网络校验未通过，守卫未开启。请先看检测清单里失败项（与「环境对齐」无关时多为 DNS/TCP/Claude 连通性）。', 'error');
+    }
     if (status.actionRequired && status.actionRequired.type === 'STATIC_RESIDENTIAL_IP_REQUIRED') {
       shouldOpenStaticIpDialogAfterEnable = true;
       openStaticIpDialog();
@@ -401,9 +789,110 @@ els.guardToggle.addEventListener('click', async () => {
   await enableGuardWithStaticIpHandling();
 });
 
+async function invokeWithTimeout(promiseFactory, timeoutMs, timeoutMessage) {
+  let timer = null;
+  const timeoutPromise = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+  });
+  try {
+    return await Promise.race([promiseFactory(), timeoutPromise]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+let consistencyActionInFlight = false;
+
+els.applyEnvironmentConsistency.addEventListener('click', async () => {
+  if (consistencyActionInFlight) return;
+  consistencyActionInFlight = true;
+  setBusy(true);
+  try {
+    els.environmentConsistencyStatus.textContent =
+      '正在对齐时区与 WebRTC（保留中文输入法，请先关闭 Chrome/Edge）…';
+    els.environmentConsistencyStatus.className = 'field-message';
+    await persistEnvironmentConsistencyConfig();
+    const result = await invokeWithTimeout(
+      () => window.networkGuard.applyEnvironmentConsistency(),
+      120000,
+      '环境对齐超时：请完全关闭 Chrome 和 Edge 后重试。'
+    );
+    if (result.status) render(result.status);
+    if (result.ok && result.restartRequired) {
+      els.environmentConsistencyStatus.textContent =
+        '对齐完成，应用约 2 秒后自动重启并重新检测。若仍失败，请注销 Windows 一次。';
+      els.environmentConsistencyStatus.className = 'field-message success';
+      return;
+    }
+    if (!result.ok) {
+      return;
+    }
+    await runPostApplyCheck();
+  } catch (error) {
+    els.environmentConsistencyStatus.textContent = error.message || '环境对齐失败。';
+    els.environmentConsistencyStatus.className = 'field-message error';
+  } finally {
+    consistencyActionInFlight = false;
+    setBusy(false);
+  }
+});
+
+els.restoreEnvironmentConsistency.addEventListener('click', async () => {
+  setBusy(true);
+  try {
+    els.environmentConsistencyStatus.textContent = '正在还原原始环境…';
+    const result = await window.networkGuard.restoreEnvironmentConsistency();
+    if (result.status) render(result.status);
+    if (!result.ok) return;
+    if (!result.restartRequired) {
+      await runPostApplyCheck();
+    }
+  } catch (error) {
+    els.environmentConsistencyStatus.textContent = error.message || '环境还原失败。';
+    els.environmentConsistencyStatus.className = 'field-message error';
+  } finally {
+    setBusy(false);
+  }
+});
+
+els.environmentConsistencyToggle.addEventListener('change', async () => {
+  if (consistencyActionInFlight) {
+    els.environmentConsistencyToggle.checked = Boolean(currentStatus?.environmentConsistency?.enabled);
+    return;
+  }
+  if (els.environmentConsistencyToggle.checked) {
+    els.applyEnvironmentConsistency.click();
+    return;
+  }
+  els.restoreEnvironmentConsistency.click();
+});
+
+els.backupEnvironmentNow.addEventListener('click', async () => {
+  if (!window.confirm('将用当前系统与浏览器环境覆盖已有备份，是否继续？')) return;
+  setBusy(true);
+  try {
+    const result = await window.networkGuard.backupEnvironmentNow();
+    if (result.status) render(result.status);
+    els.environmentConsistencyStatus.textContent = '已重新备份当前环境。';
+    els.environmentConsistencyStatus.className = 'field-message success';
+  } catch (error) {
+    els.environmentConsistencyStatus.textContent = error.message || '备份失败。';
+    els.environmentConsistencyStatus.className = 'field-message error';
+  } finally {
+    setBusy(false);
+  }
+});
+
+for (const input of [els.deriveFromExitIp, els.keepChineseInput, els.profileOverrideTimeZone, els.profileOverrideLanguage]) {
+  input.addEventListener('change', async () => {
+    render(await persistEnvironmentConsistencyConfig());
+  });
+}
+
 els.checkNow.addEventListener('click', async () => {
   setBusy(true);
   try {
+    await reportEnvironment();
     await window.networkGuard.checkNow();
     await refresh();
   } finally {
@@ -421,6 +910,69 @@ els.reloadRules.addEventListener('click', async () => {
   }
 });
 
+for (const input of [
+  els.validationClaude,
+  els.validationCodex,
+  els.validationWebProbe,
+  els.validationCustomHosts
+]) {
+  if (input) input.addEventListener('change', updateValidationEditorState);
+}
+
+if (els.saveValidation) {
+  els.saveValidation.addEventListener('click', async () => {
+    setBusy(true);
+    try {
+      const validation = readValidationInputFromForm();
+      render(await window.networkGuard.saveValidationConfig(validation));
+      els.validationStatus.textContent = '校验配置已保存，建议立即检测。';
+      els.validationStatus.className = 'field-message success';
+      setHelp('接口校验范围已更新。', 'success');
+    } catch (error) {
+      els.validationStatus.textContent = error.message || '保存失败。';
+      els.validationStatus.className = 'field-message error';
+      setHelp(error.message || '保存失败。', 'error');
+    } finally {
+      setBusy(false);
+    }
+  });
+}
+
+if (els.resetValidationDefaults) {
+  els.resetValidationDefaults.addEventListener('click', async () => {
+    setBusy(true);
+    try {
+      render(await window.networkGuard.resetValidationDefaults());
+      els.validationStatus.textContent = '已还原为默认校验范围（Claude + Codex）。';
+      els.validationStatus.className = 'field-message success';
+      setHelp('校验配置已还原默认。', 'success');
+    } catch (error) {
+      els.validationStatus.textContent = error.message || '还原失败。';
+      els.validationStatus.className = 'field-message error';
+    } finally {
+      setBusy(false);
+    }
+  });
+}
+
+if (els.resetTargetConfigDefaults) {
+  els.resetTargetConfigDefaults.addEventListener('click', async () => {
+    if (!window.confirm('将还原拦截规则、校验范围与静态 IP 为出厂默认，是否继续？')) return;
+    setBusy(true);
+    try {
+      render(await window.networkGuard.resetTargetConfigDefaults());
+      els.validationStatus.textContent = '全部目标配置已还原默认。';
+      els.validationStatus.className = 'field-message success';
+      setHelp('全部配置已还原默认。', 'success');
+    } catch (error) {
+      els.validationStatus.textContent = error.message || '还原失败。';
+      els.validationStatus.className = 'field-message error';
+    } finally {
+      setBusy(false);
+    }
+  });
+}
+
 els.saveStaticIp.addEventListener('click', async () => {
   setBusy(true);
   try {
@@ -430,6 +982,60 @@ els.saveStaticIp.addEventListener('click', async () => {
     setHelp(error.message || '保存失败。', 'error');
   } finally {
     setBusy(false);
+  }
+});
+
+els.emergencyRestore.addEventListener('click', async () => {
+  setBusy(true);
+  try {
+    render(await window.networkGuard.emergencyRestore());
+  } finally {
+    setBusy(false);
+  }
+});
+
+els.resetBinding.addEventListener('click', async () => {
+  setBusy(true);
+  try {
+    render(await window.networkGuard.resetExitBinding());
+  } finally {
+    setBusy(false);
+  }
+});
+
+els.rebindCurrentExit.addEventListener('click', async () => {
+  setBusy(true);
+  try {
+    render(await window.networkGuard.rebindExitToCurrent());
+  } catch (error) {
+    els.bindingHelp.textContent = error.message || '绑定当前出口失败。';
+    els.bindingHelp.className = 'field-message error';
+  } finally {
+    setBusy(false);
+  }
+});
+
+els.completeSetup.addEventListener('click', async () => {
+  setBusy(true);
+  try {
+    if (selectedSetupStrategy() === 'skip') {
+      render(await saveStaticIp('0.0.0.0', { allowEmpty: false }));
+    }
+    render(await window.networkGuard.completeSetup({ staticIpStrategy: selectedSetupStrategy() }));
+  } finally {
+    setBusy(false);
+  }
+});
+
+els.reopenSetup.addEventListener('click', async () => {
+  render(await window.networkGuard.reopenSetup());
+});
+
+els.copyReport.addEventListener('click', async () => {
+  await renderDiagnosticReport();
+  const text = els.diagnosticReport.textContent || '';
+  if (navigator.clipboard && text) {
+    await navigator.clipboard.writeText(text);
   }
 });
 
@@ -474,6 +1080,13 @@ els.launchAtLogin.addEventListener('change', async () => {
 });
 
 window.networkGuard.onEvent((event) => {
+  if (event.type === 'post-apply-check') {
+    runPostApplyCheck().catch(() => {});
+    return;
+  }
+  if (event.type === 'guard-enable-failed') {
+    setHelp('开启守卫前网络校验未通过，守卫未开启。请查看检测清单中的失败项。', 'error');
+  }
   if (event.status) {
     render(event.status);
     if (shouldOpenStaticIpDialogAfterEnable && event.status.actionRequired && event.status.actionRequired.type === 'STATIC_RESIDENTIAL_IP_REQUIRED') {

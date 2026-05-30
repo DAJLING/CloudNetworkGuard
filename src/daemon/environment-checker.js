@@ -7,6 +7,28 @@ function normalizeLanguage(language) {
   return String(language || '').trim();
 }
 
+function buildEnvironmentCheckInput(clientEnvironment = {}, consistency = {}) {
+  const consistencyActive =
+    consistency.enabled === true && consistency.lastApplyResult && consistency.lastApplyResult.ok === true;
+  const keepChineseInput = consistency.keepChineseInput !== false;
+  const merged = {
+    ...clientEnvironment,
+    keepChineseInput,
+    trustConsistencyLanguage: keepChineseInput,
+    trustConsistencyWebRtc: consistencyActive
+  };
+
+  if (consistencyActive && !keepChineseInput && consistency.lastTargetProfile && consistency.lastTargetProfile.language) {
+    merged.language = consistency.lastTargetProfile.language;
+    merged.languages =
+      consistency.lastTargetProfile.languages && consistency.lastTargetProfile.languages.length
+        ? consistency.lastTargetProfile.languages
+        : [consistency.lastTargetProfile.language];
+  }
+
+  return merged;
+}
+
 function checkClientEnvironment(environment = {}) {
   const reasons = [];
   const timeZone = environment.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown';
@@ -14,11 +36,17 @@ function checkClientEnvironment(environment = {}) {
   const languages = Array.isArray(environment.languages) ? environment.languages.map(normalizeLanguage) : [];
 
   if (BLOCKED_TIME_ZONES.has(timeZone)) reasons.push(CheckReason.ENVIRONMENT_MISMATCH);
-  if ([language, ...languages].some((item) => BLOCKED_LANGUAGES.includes(item))) {
+  const trustLanguage =
+    environment.trustConsistencyLanguage === true || environment.keepChineseInput === true;
+  if (!trustLanguage && [language, ...languages].some((item) => BLOCKED_LANGUAGES.includes(item))) {
     reasons.push(CheckReason.ENVIRONMENT_MISMATCH);
   }
 
-  if (environment.webRtcLocalIpCount && environment.webRtcLocalIpCount > 0) {
+  const trustWebRtc =
+    environment.trustConsistencyWebRtc === true ||
+    environment.trustConsistencyLanguage === true ||
+    environment.ignoreWebRtcLocalIp === true;
+  if (!trustWebRtc && environment.webRtcLocalIpCount && environment.webRtcLocalIpCount > 0) {
     reasons.push(CheckReason.ENVIRONMENT_MISMATCH);
   }
 
@@ -28,12 +56,15 @@ function checkClientEnvironment(environment = {}) {
     timeZone,
     language,
     languages,
-    webRtcLocalIpCount: environment.webRtcLocalIpCount || 0
+    webRtcLocalIpCount: environment.webRtcLocalIpCount || 0,
+    webRtcCheckSkipped: trustWebRtc && environment.webRtcLocalIpCount > 0,
+    languageCheckSkipped: trustLanguage && [language, ...languages].some((item) => BLOCKED_LANGUAGES.includes(item))
   };
 }
 
 module.exports = {
   BLOCKED_TIME_ZONES,
   BLOCKED_LANGUAGES,
+  buildEnvironmentCheckInput,
   checkClientEnvironment
 };

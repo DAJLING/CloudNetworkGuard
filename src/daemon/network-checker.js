@@ -3,7 +3,7 @@ const tls = require('tls');
 const { runFreeProviders } = require('./providers');
 const { scoreProviderResults, combineVerdicts } = require('./scoring');
 const { hashIp, maskIp } = require('./static-ip-observer');
-const { checkClientEnvironment } = require('./environment-checker');
+const { checkClientEnvironment, buildEnvironmentCheckInput } = require('./environment-checker');
 const { probeClaudeWeb } = require('./claude-web-probe');
 const { CheckReason, NetworkVerdict } = require('../shared/constants');
 const { normalizeHost } = require('./rules');
@@ -15,10 +15,35 @@ const CLAUDE_CONTROL_HOSTS = ['claude.ai', 'api.anthropic.com'];
 async function dnsProbe(host) {
   try {
     const addresses = await dns.resolve(host);
-    return { ok: addresses.length > 0, addresses, error: null };
+    return { ok: addresses.length > 0, addresses, error: null, resolver: 'dns' };
   } catch (error) {
-    return { ok: false, addresses: [], error: error.code || error.message };
+    const originalError = error.code || error.message;
+    try {
+      const records = await dns.lookup(host, { all: true });
+      const addresses = records.map((record) => record.address).filter(Boolean);
+      return {
+        ok: addresses.length > 0,
+        addresses,
+        error: null,
+        resolver: 'system',
+        fallbackFrom: originalError
+      };
+    } catch (fallbackError) {
+      return {
+        ok: false,
+        addresses: [],
+        error: fallbackError.code || fallbackError.message,
+        resolver: 'system',
+        fallbackFrom: originalError
+      };
+    }
   }
+}
+
+function pickProbeAddress(dnsResult) {
+  const addresses = dnsResult && Array.isArray(dnsResult.addresses) ? dnsResult.addresses : [];
+  const ipv4 = addresses.find((address) => /^\d{1,3}(?:\.\d{1,3}){3}$/.test(address));
+  return ipv4 || addresses[0] || null;
 }
 
 function tcpProbe(host, port = 443, timeoutMs = 5000) {
@@ -37,12 +62,12 @@ function tcpProbe(host, port = 443, timeoutMs = 5000) {
   });
 }
 
-function tlsProbe(host, timeoutMs = 5000) {
+function tlsProbe(host, servername = host, timeoutMs = 5000) {
   return new Promise((resolve) => {
     const socket = tls.connect({
       host,
       port: 443,
-      servername: host,
+      servername,
       timeout: timeoutMs
     });
 
@@ -70,8 +95,9 @@ async function checkExternalAccess(hosts = TARGET_HEALTH_HOSTS, controlHosts = C
   const results = [];
   for (const host of hosts) {
     const dnsResult = await dnsProbe(host);
-    const tcpResult = dnsResult.ok ? await tcpProbe(host) : { ok: false, error: 'DNS_FAILED' };
-    const tlsResult = tcpResult.ok ? await tlsProbe(host) : { ok: false, error: 'TCP_FAILED' };
+    const probeTarget = pickProbeAddress(dnsResult) || host;
+    const tcpResult = dnsResult.ok ? await tcpProbe(probeTarget) : { ok: false, error: 'DNS_FAILED' };
+    const tlsResult = tcpResult.ok ? await tlsProbe(probeTarget, host) : { ok: false, error: 'TCP_FAILED' };
     results.push({
       host,
       ok: Boolean(dnsResult.ok && tcpResult.ok && tlsResult.ok),
@@ -387,7 +413,10 @@ class NetworkChecker {
     ]);
     const providerScore = scoreProviderResults(providerResults);
     const state = this.store.getState();
-    const environment = this.environmentCheck(state.clientEnvironment || {});
+    const consistency = state.environmentConsistency || {};
+    const environment = this.environmentCheck(
+      buildEnvironmentCheckInput(state.clientEnvironment || {}, consistency)
+    );
     const binding = checkExitBinding({ providerScore, state });
     const staticObservation = evaluateStaticResidentialIp({
       currentIp: providerScore.ip,

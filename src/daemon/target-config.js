@@ -4,7 +4,8 @@ const {
   DEFAULT_TARGET_CONTROL_HOSTS,
   DEFAULT_TARGET_HEALTH_HOSTS,
   DEFAULT_TARGET_RULES,
-  DEFAULT_TARGET_WEB_PROBE_URL
+  DEFAULT_TARGET_WEB_PROBE_URL,
+  VALIDATION_SERVICES
 } = require('../shared/constants');
 const { normalizeHost } = require('./rules');
 const { defaultDataDir } = require('./store');
@@ -92,14 +93,118 @@ function deriveHostsFromRules(rules) {
   );
 }
 
+function defaultValidation() {
+  return {
+    services: { claude: true, codex: true },
+    webProbe: { enabled: true, url: DEFAULT_TARGET_WEB_PROBE_URL },
+    useCustomHosts: false,
+    customHealthCheckHosts: [],
+    customControlHosts: []
+  };
+}
+
+function normalizeValidation(raw) {
+  if (!raw || typeof raw !== 'object') {
+    return defaultValidation();
+  }
+
+  const services = raw.services && typeof raw.services === 'object' ? raw.services : {};
+  const webProbe = raw.webProbe && typeof raw.webProbe === 'object' ? raw.webProbe : {};
+  const customHealthCheckHosts = normalizeHosts(raw.customHealthCheckHosts);
+  const customControlHosts = normalizeHosts(raw.customControlHosts);
+
+  return {
+    services: {
+      claude: services.claude !== false,
+      codex: services.codex !== false
+    },
+    webProbe: {
+      enabled: webProbe.enabled !== false,
+      url:
+        typeof webProbe.url === 'string' && webProbe.url.trim()
+          ? webProbe.url.trim()
+          : DEFAULT_TARGET_WEB_PROBE_URL
+    },
+    useCustomHosts: raw.useCustomHosts === true,
+    customHealthCheckHosts,
+    customControlHosts
+  };
+}
+
+function legacyValidationFromRaw(raw) {
+  const hasExplicitHosts = Array.isArray(raw.healthCheckHosts) && raw.healthCheckHosts.length > 0;
+  if (!hasExplicitHosts) return null;
+
+  return {
+    ...defaultValidation(),
+    useCustomHosts: true,
+    customHealthCheckHosts: normalizeHosts(raw.healthCheckHosts),
+    customControlHosts: normalizeHosts(raw.controlHosts),
+    webProbe: {
+      enabled: Boolean(raw.webProbeUrl),
+      url: typeof raw.webProbeUrl === 'string' && raw.webProbeUrl.trim() ? raw.webProbeUrl.trim() : DEFAULT_TARGET_WEB_PROBE_URL
+    }
+  };
+}
+
+function resolveValidationHosts(validation) {
+  const normalized = normalizeValidation(validation);
+
+  if (!normalized.services.claude && !normalized.services.codex) {
+    throw new Error('VALIDATION_SERVICE_REQUIRED');
+  }
+
+  if (normalized.useCustomHosts) {
+    const healthCheckHosts = normalized.customHealthCheckHosts;
+    const controlHosts = normalized.customControlHosts.length
+      ? normalized.customControlHosts
+      : healthCheckHosts.slice();
+    if (!healthCheckHosts.length) {
+      throw new Error('VALIDATION_CUSTOM_HOSTS_REQUIRED');
+    }
+    return {
+      validation: normalized,
+      healthCheckHosts,
+      controlHosts,
+      webProbeUrl: normalized.webProbe.enabled ? normalized.webProbe.url : null
+    };
+  }
+
+  const healthCheckHosts = [];
+  const controlHosts = [];
+  if (normalized.services.claude) {
+    healthCheckHosts.push(...VALIDATION_SERVICES.claude.healthCheckHosts);
+    controlHosts.push(...VALIDATION_SERVICES.claude.controlHosts);
+  }
+  if (normalized.services.codex) {
+    healthCheckHosts.push(...VALIDATION_SERVICES.codex.healthCheckHosts);
+    controlHosts.push(...VALIDATION_SERVICES.codex.controlHosts);
+  }
+
+  let webProbeUrl = null;
+  if (normalized.webProbe.enabled && normalized.services.claude) {
+    webProbeUrl = normalized.webProbe.url || VALIDATION_SERVICES.claude.defaultWebProbeUrl;
+  }
+
+  return {
+    validation: normalized,
+    healthCheckHosts: unique(healthCheckHosts),
+    controlHosts: unique(controlHosts),
+    webProbeUrl
+  };
+}
+
 function defaultTargetConfig() {
+  const validation = defaultValidation();
+  const resolved = resolveValidationHosts(validation);
   return {
     version: 1,
     rules: DEFAULT_TARGET_RULES,
-    healthCheckHosts: DEFAULT_TARGET_HEALTH_HOSTS,
-    controlHosts: DEFAULT_TARGET_CONTROL_HOSTS,
+    validation: resolved.validation,
+    healthCheckHosts: resolved.healthCheckHosts,
+    controlHosts: resolved.controlHosts,
     firewallHosts: deriveHostsFromRules(DEFAULT_TARGET_RULES),
-    webProbeUrl: DEFAULT_TARGET_WEB_PROBE_URL,
+    webProbeUrl: resolved.webProbeUrl,
     staticResidentialIp: ''
   };
 }
@@ -109,14 +214,20 @@ function normalizeTargetConfig(raw, filePath) {
     ? raw.rules.map(normalizeRule).filter(Boolean)
     : DEFAULT_TARGET_RULES.map(normalizeRule).filter(Boolean);
   const derivedHosts = deriveHostsFromRules(rules);
-  const healthCheckHosts = normalizeHosts(raw && raw.healthCheckHosts);
-  const controlHosts = normalizeHosts(raw && raw.controlHosts);
   const firewallHosts = normalizeHosts(raw && raw.firewallHosts);
-  const resolvedHealthHosts = healthCheckHosts.length ? healthCheckHosts : derivedHosts.slice(0, 3);
-  const webProbeUrl =
-    raw && Object.prototype.hasOwnProperty.call(raw, 'webProbeUrl')
-      ? raw.webProbeUrl
-      : DEFAULT_TARGET_WEB_PROBE_URL;
+
+  let validation = raw && raw.validation ? normalizeValidation(raw.validation) : legacyValidationFromRaw(raw || {});
+  if (!validation) validation = defaultValidation();
+
+  let resolvedHosts;
+  let validationError = null;
+  try {
+    resolvedHosts = resolveValidationHosts(validation);
+  } catch (error) {
+    validationError = error.message || 'VALIDATION_CONFIG_INVALID';
+    resolvedHosts = resolveValidationHosts(defaultValidation());
+  }
+
   let staticResidentialIp = '';
   let staticResidentialIpError = null;
   try {
@@ -129,12 +240,14 @@ function normalizeTargetConfig(raw, filePath) {
     path: filePath,
     version: Number(raw && raw.version) || 1,
     rules,
-    healthCheckHosts: resolvedHealthHosts,
-    controlHosts: controlHosts.length ? controlHosts : resolvedHealthHosts.slice(0, 2),
+    validation: resolvedHosts.validation,
+    healthCheckHosts: resolvedHosts.healthCheckHosts,
+    controlHosts: resolvedHosts.controlHosts,
     firewallHosts: firewallHosts.length ? firewallHosts : derivedHosts,
-    webProbeUrl: typeof webProbeUrl === 'string' && webProbeUrl.trim() ? webProbeUrl.trim() : null,
+    webProbeUrl: resolvedHosts.webProbeUrl,
     staticResidentialIp,
     staticResidentialIpError,
+    validationError,
     error: null,
     loadedAt: new Date().toISOString()
   };
@@ -181,6 +294,34 @@ class TargetConfigManager {
     this.saveRaw(raw);
     return normalizeTargetConfig(raw, this.filePath);
   }
+
+  applyResolvedValidation(raw, validationInput) {
+    const resolved = resolveValidationHosts(validationInput);
+    raw.validation = resolved.validation;
+    raw.healthCheckHosts = resolved.healthCheckHosts;
+    raw.controlHosts = resolved.controlHosts;
+    raw.webProbeUrl = resolved.webProbeUrl;
+    return resolved;
+  }
+
+  saveValidation(validationInput) {
+    const raw = this.readRaw();
+    this.applyResolvedValidation(raw, validationInput);
+    this.saveRaw(raw);
+    return normalizeTargetConfig(raw, this.filePath);
+  }
+
+  resetValidationToDefaults() {
+    const raw = this.readRaw();
+    this.applyResolvedValidation(raw, defaultValidation());
+    this.saveRaw(raw);
+    return normalizeTargetConfig(raw, this.filePath);
+  }
+
+  resetToDefaults() {
+    this.saveRaw(defaultTargetConfig());
+    return normalizeTargetConfig(this.readRaw(), this.filePath);
+  }
 }
 
 module.exports = {
@@ -188,9 +329,13 @@ module.exports = {
   TARGET_CONFIG_FILE,
   defaultTargetConfig,
   defaultTargetConfigPath,
+  defaultValidation,
   deriveHostsFromRules,
   isValidIpv4,
   normalizeStaticResidentialIp,
   normalizeTargetConfig,
-  TargetConfigManager
+  normalizeValidation,
+  resolveValidationHosts,
+  TargetConfigManager,
+  VALIDATION_SERVICES
 };

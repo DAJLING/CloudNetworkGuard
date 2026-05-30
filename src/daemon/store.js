@@ -37,13 +37,34 @@ class Store {
     return {
       guardState: GuardState.DISABLED,
       guardMode: 'AUTO',
+      systemProxyApplied: false,
+      checkingNetwork: false,
       launchAtLogin: false,
       salt: crypto.randomBytes(24).toString('hex'),
       staticIp: null,
       boundExitIpHash: null,
       clientEnvironment: null,
+      environmentConsistency: {
+        enabled: false,
+        deriveFromExitIp: true,
+        keepChineseInput: true,
+        profileOverride: { timeZone: '', language: '', languages: [] },
+        backup: { createdAt: null, path: null },
+        lastTargetProfile: null,
+        lastApplyResult: null,
+        lastRestoreResult: null,
+        pendingPostApplyCheck: false
+      },
       actionRequired: null,
       lastCheck: null,
+      recovery: {
+        lastResult: null
+      },
+      setup: {
+        completed: false,
+        completedAt: null,
+        staticIpStrategy: null
+      },
       firewall: {
         mode: 'IDLE',
         rules: [],

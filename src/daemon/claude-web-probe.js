@@ -1,5 +1,10 @@
 const { CheckReason, NetworkVerdict } = require('../shared/constants');
 
+function headerValue(headers, name) {
+  if (!headers || !headers.get) return null;
+  return headers.get(name) || headers.get(name.toLowerCase()) || headers.get(name.toUpperCase());
+}
+
 async function probeClaudeWeb(fetchImpl = fetch, url = 'https://claude.ai/') {
   try {
     const response = await fetchImpl(url, {
@@ -11,12 +16,15 @@ async function probeClaudeWeb(fetchImpl = fetch, url = 'https://claude.ai/') {
       }
     });
 
-    const ok = response.status >= 200 && response.status < 400;
+    const cfMitigated = headerValue(response.headers, 'cf-mitigated');
+    const isBrowserChallenge = response.status === 403 && String(cfMitigated || '').toLowerCase() === 'challenge';
+    const ok = (response.status >= 200 && response.status < 400) || isBrowserChallenge;
     return {
       verdict: ok ? NetworkVerdict.PASS : NetworkVerdict.BLOCK,
       reasons: ok ? [] : [CheckReason.CLAUDE_WEB_CHECK_FAILED],
       status: response.status,
-      location: response.headers && response.headers.get ? response.headers.get('location') : null
+      location: headerValue(response.headers, 'location'),
+      challenge: isBrowserChallenge ? 'cloudflare' : null
     };
   } catch (error) {
     return {
@@ -29,5 +37,6 @@ async function probeClaudeWeb(fetchImpl = fetch, url = 'https://claude.ai/') {
 }
 
 module.exports = {
+  headerValue,
   probeClaudeWeb
 };

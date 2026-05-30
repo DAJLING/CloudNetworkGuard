@@ -1,5 +1,8 @@
 node_modules/
 dist/
+dist-*/
+.asar-check/
+release-pack/
 *.log
 .DS_Store
 Thumbs.db

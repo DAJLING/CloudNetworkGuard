@@ -35,6 +35,16 @@ function sanitizeRuleName(value) {
   return String(value).replace(/[^a-zA-Z0-9_.:-]/g, '_');
 }
 
+async function isWindowsElevated(execFileImpl = execFilePromise) {
+  if (process.platform !== 'win32') return false;
+  try {
+    await execFileImpl('net', ['session']);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function resolveTargetIps(hosts = FIREWALL_TARGET_HOSTS) {
   const ips = new Set();
   const results = [];
@@ -98,6 +108,15 @@ class FirewallManager {
   }
 
   async applyWindowsBlock() {
+    if (!(await isWindowsElevated())) {
+      return {
+        applied: false,
+        mode: 'SKIPPED',
+        rules: [],
+        lastError: '需要管理员权限才能配置 Windows 防火墙规则，请以管理员身份运行本应用。'
+      };
+    }
+
     const resolved = await resolveTargetIps(this.hosts);
     const rules = [];
     const errors = [];
@@ -129,13 +148,16 @@ class FirewallManager {
       }
     }
 
-    const hostsResult = await this.applyHostsBlock().catch((error) => ({
-      applied: false,
-      error: error.message
-    }));
+    const useHostsBlock = process.env.NETWORK_GUARD_USE_HOSTS_BLOCK === '1';
+    const hostsResult = useHostsBlock
+      ? await this.applyHostsBlock().catch((error) => ({
+          applied: false,
+          error: error.message
+        }))
+      : { applied: false, skipped: true, reason: 'HOSTS_BLOCK_DISABLED' };
 
     return {
-      applied: rules.length > 0 || hostsResult.applied,
+      applied: rules.length > 0 || hostsResult.applied === true,
       mode: errors.length || hostsResult.error ? 'PARTIAL_BLOCK' : 'BLOCK',
       rules,
       hosts: hostsResult,
@@ -145,6 +167,15 @@ class FirewallManager {
   }
 
   async clearWindowsBlock(existingRules = []) {
+    if (!(await isWindowsElevated())) {
+      return {
+        applied: false,
+        mode: 'SKIPPED',
+        rules: [],
+        lastError: '未以管理员运行，跳过清理防火墙规则（不影响环境检测）。'
+      };
+    }
+
     const rules = existingRules.length
       ? existingRules
       : (await resolveTargetIps(this.hosts)).ips.map((ip) => ({
@@ -227,5 +258,6 @@ module.exports = {
   HOSTS_BLOCK_START,
   HOSTS_BLOCK_END,
   resolveTargetIps,
+  isWindowsElevated,
   FirewallManager
 };

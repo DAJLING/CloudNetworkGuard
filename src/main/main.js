@@ -8,6 +8,15 @@ let mainWindow = null;
 let tray = null;
 let service = null;
 const notificationDeduper = new NotificationDeduper();
+const appIconPath = path.join(__dirname, '../../assets/app-icon.png');
+
+// Prevent WebRTC from exposing RFC1918 local IPs during environment checks.
+app.commandLine.appendSwitch('force-webrtc-ip-handling-policy', 'disable_non_proxied_udp');
+
+function scheduleAppRelaunch() {
+  app.relaunch();
+  app.exit(0);
+}
 
 function statusLabel(status) {
   if (status.guardState === GuardState.DISABLED) return '守卫关闭';
@@ -23,6 +32,7 @@ function createWindow() {
     minHeight: 640,
     title: 'Claude Codex Network Guard',
     backgroundColor: '#f6f7f9',
+    icon: appIconPath,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -38,7 +48,7 @@ function createWindow() {
 }
 
 function createTray() {
-  const icon = nativeImage.createEmpty();
+  const icon = nativeImage.createFromPath(appIconPath);
   tray = new Tray(icon);
   tray.setToolTip('Claude Codex Network Guard');
   updateTray();
@@ -138,6 +148,16 @@ function wireIpc() {
     updateTray();
     return status;
   });
+  ipcMain.handle('guard:emergency-restore', async () => {
+    const status = await service.emergencyRestore();
+    updateTray();
+    return status;
+  });
+  ipcMain.handle('guard:reset-exit-binding', () => service.resetExitBinding());
+  ipcMain.handle('guard:rebind-exit-current', async () => service.rebindExitToCurrent());
+  ipcMain.handle('guard:complete-setup', (_event, setup) => service.completeSetup(setup || {}));
+  ipcMain.handle('guard:reopen-setup', () => service.reopenSetup());
+  ipcMain.handle('guard:get-diagnostic-report', () => service.getDiagnosticReport());
   ipcMain.handle('guard:check-now', async () => {
     const check = await service.checkNow();
     updateTray();
@@ -145,6 +165,21 @@ function wireIpc() {
   });
   ipcMain.handle('guard:reload-rules', async () => {
     const status = await service.reloadTargetConfig();
+    updateTray();
+    return status;
+  });
+  ipcMain.handle('guard:save-validation-config', async (_event, validation) => {
+    const status = await service.saveValidationConfig(validation || {});
+    updateTray();
+    return status;
+  });
+  ipcMain.handle('guard:reset-validation-defaults', async () => {
+    const status = await service.resetValidationDefaults();
+    updateTray();
+    return status;
+  });
+  ipcMain.handle('guard:reset-target-config-defaults', async () => {
+    const status = await service.resetTargetConfigDefaults();
     updateTray();
     return status;
   });
@@ -161,6 +196,32 @@ function wireIpc() {
     service.store.update({ launchAtLogin: Boolean(enabled) });
     updateTray();
     return service.getStatus();
+  });
+  ipcMain.handle('guard:environment-consistency-apply', async () => {
+    const result = await service.applyEnvironmentConsistency();
+    updateTray();
+    if (result.ok && result.restartRequired) {
+      setTimeout(() => scheduleAppRelaunch(), 1500);
+    }
+    return result;
+  });
+  ipcMain.handle('guard:environment-consistency-restore', async () => {
+    const result = await service.restoreEnvironmentConsistency();
+    updateTray();
+    if (result.ok) {
+      setTimeout(() => scheduleAppRelaunch(), 1500);
+    }
+    return result;
+  });
+  ipcMain.handle('guard:environment-consistency-set-config', (_event, config) => {
+    const status = service.setEnvironmentConsistencyConfig(config || {});
+    updateTray();
+    return status;
+  });
+  ipcMain.handle('guard:environment-consistency-backup-now', async () => {
+    const result = await service.backupEnvironmentNow();
+    updateTray();
+    return result;
   });
 }
 
@@ -181,6 +242,20 @@ app.whenReady().then(async () => {
   createWindow();
   createTray();
 
+  const pendingPostApplyCheck = service.getStatus().environmentConsistency?.pendingPostApplyCheck;
+  if (pendingPostApplyCheck) {
+    const stored = service.store.getState().environmentConsistency || {};
+    service.store.update({
+      environmentConsistency: {
+        ...stored,
+        pendingPostApplyCheck: false
+      }
+    });
+    mainWindow.webContents.once('did-finish-load', () => {
+      mainWindow.webContents.send('guard:event', { type: 'post-apply-check' });
+    });
+  }
+
   if (service.getStatus().guardState === GuardState.ENABLED) {
     service.enableGuard().catch(() => {});
   }
@@ -197,7 +272,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', async () => {
-  if (service && service.getStatus().guardState === GuardState.ENABLED) {
-    await service.proxyManager.disable().catch(() => {});
+  if (service) {
+    await service.setSystemProxyEnabled(false).catch(() => {});
   }
 });

@@ -155,6 +155,10 @@ test('applyProfile applies timezone and skips language when keeping Chinese inpu
   assert.equal(result.steps['mac.timezone'].ok, true);
   assert.equal(result.steps['mac.language'].skipped, true);
   assert.equal(result.steps['mac.language'].reason, 'KEEP_CHINESE_INPUT');
+  assert.equal(result.steps['chrome.language'].skipped, true);
+  assert.equal(result.steps['chrome.language'].reason, 'KEEP_CHINESE_INPUT');
+  assert.equal(result.steps['edge.language'].skipped, true);
+  assert.equal(result.steps['edge.language'].reason, 'KEEP_CHINESE_INPUT');
   assert.deepEqual(privileged[0], [['systemsetup', '-settimezone', 'America/Chicago']]);
 });
 
@@ -190,8 +194,23 @@ test('applyProfile patches browser language when keepChineseInput is false', asy
 });
 
 test('applyProfile fails fast when browsers are running', async () => {
-  const applier = new EnvironmentApplierMac({ platform: 'darwin' });
+  const mutations = [];
+  const runner = {
+    run: async (command, args = []) => {
+      mutations.push({ type: 'run', command, args });
+      throw new Error(`unexpected command: ${command}`);
+    },
+    runPrivilegedCommands: async (commands) => {
+      mutations.push({ type: 'privileged', commands });
+      throw new Error('unexpected privileged command');
+    }
+  };
+  const applier = new EnvironmentApplierMac({ platform: 'darwin', runner });
   applier.isBrowserRunning = async () => ['chrome', 'edge'];
+  applier.patchBrowserPreferences = () => {
+    mutations.push({ type: 'preferences' });
+    throw new Error('unexpected browser preferences patch');
+  };
 
   const result = await applier.applyProfile({
     timeZone: 'America/New_York',
@@ -202,6 +221,7 @@ test('applyProfile fails fast when browsers are running', async () => {
   assert.equal(result.ok, false);
   assert.equal(result.steps.preflight.error, 'BROWSER_RUNNING');
   assert.deepEqual(result.steps.preflight.running, ['chrome', 'edge']);
+  assert.deepEqual(mutations, []);
 });
 
 test('restoreFromBackup restores timezone, language, and browser preferences', async () => {

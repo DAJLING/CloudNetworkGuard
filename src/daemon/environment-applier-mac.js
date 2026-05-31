@@ -32,7 +32,7 @@ function parseDefaultsArray(output) {
 }
 
 function localeFromLanguage(language) {
-  const normalized = String(language || 'en-US').replace('-', '_');
+  const normalized = String(language || 'en-US').replace(/-/g, '_');
   return normalized || 'en_US';
 }
 

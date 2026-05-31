@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
-const { EnvironmentApplierMac } = require('../src/daemon/environment-applier-mac');
+const { EnvironmentApplierMac, localeFromLanguage } = require('../src/daemon/environment-applier-mac');
 
 function memoryFs(files = {}) {
   const calls = [];
@@ -67,6 +67,11 @@ test('isBrowserRunning detects Chrome and Edge with pgrep', async () => {
   const applier = new EnvironmentApplierMac({ platform: 'darwin', runner });
 
   assert.deepEqual(await applier.isBrowserRunning(), ['chrome', 'edge']);
+});
+
+test('localeFromLanguage normalizes all language subtags', () => {
+  assert.equal(localeFromLanguage('en-US'), 'en_US');
+  assert.equal(localeFromLanguage('zh-Hans-CN'), 'zh_Hans_CN');
 });
 
 test('patchBrowserPreferences updates intl and WebRTC fields atomically', () => {

@@ -1,0 +1,82 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const path = require('path');
+const { EnvironmentApplierMac } = require('../src/daemon/environment-applier-mac');
+
+function memoryFs(files = {}) {
+  return {
+    existsSync: (filePath) => Object.prototype.hasOwnProperty.call(files, filePath),
+    readFileSync: (filePath) => files[filePath],
+    writeFileSync: (filePath, content) => {
+      files[filePath] = content;
+    },
+    renameSync: (from, to) => {
+      files[to] = files[from];
+      delete files[from];
+    },
+    mkdirSync: () => {}
+  };
+}
+
+test('captureCurrentState captures mac timezone and browser preferences', async () => {
+  const homeDir = '/Users/alice';
+  const chromePrefs = path.join(homeDir, 'Library', 'Application Support', 'Google', 'Chrome', 'Default', 'Preferences');
+  const fsImpl = memoryFs({
+    [chromePrefs]: JSON.stringify({
+      intl: { accept_languages: 'zh-CN,zh' },
+      webrtc: { ip_handling_policy: 'default' }
+    })
+  });
+  const calls = [];
+  const runner = {
+    run: async (command, args) => {
+      calls.push({ command, args });
+      if (command === 'systemsetup') return 'Time Zone: Asia/Shanghai\n';
+      if (command === 'defaults' && args.includes('AppleLanguages')) return '(\n    "zh-Hans-CN",\n    "en-US"\n)\n';
+      if (command === 'defaults' && args.includes('AppleLocale')) return 'zh_CN\n';
+      if (command === 'pgrep') throw new Error('not used');
+      return '';
+    }
+  };
+  const applier = new EnvironmentApplierMac({ platform: 'darwin', homeDir, fsImpl, runner });
+
+  const state = await applier.captureCurrentState();
+
+  assert.equal(state.platform, 'darwin');
+  assert.equal(state.mac.timeZone, 'Asia/Shanghai');
+  assert.deepEqual(state.mac.appleLanguages, ['zh-Hans-CN', 'en-US']);
+  assert.equal(state.mac.appleLocale, 'zh_CN');
+  assert.equal(state.chrome.installed, true);
+  assert.equal(state.chrome.intlAcceptLanguages, 'zh-CN,zh');
+  assert.equal(state.chrome.webrtcPreference, 'default');
+});
+
+test('isBrowserRunning detects Chrome and Edge with pgrep', async () => {
+  const runner = {
+    run: async (command, args) => {
+      if (command === 'pgrep' && args.includes('Google Chrome')) return '123\n';
+      if (command === 'pgrep' && args.includes('Microsoft Edge')) throw new Error('not running');
+      return '';
+    }
+  };
+  const applier = new EnvironmentApplierMac({ platform: 'darwin', runner });
+
+  assert.deepEqual(await applier.isBrowserRunning(), ['chrome']);
+});
+
+test('patchBrowserPreferences updates intl and WebRTC fields atomically', () => {
+  const prefsPath = '/tmp/Preferences';
+  const files = {
+    [prefsPath]: JSON.stringify({ intl: { accept_languages: 'zh-CN,zh' } })
+  };
+  const applier = new EnvironmentApplierMac({ platform: 'darwin', fsImpl: memoryFs(files) });
+
+  applier.patchBrowserPreferences(prefsPath, {
+    acceptLanguages: 'en-US',
+    webRtcPolicy: 'disable_non_proxied_udp'
+  });
+
+  const prefs = JSON.parse(files[prefsPath]);
+  assert.equal(prefs.intl.accept_languages, 'en-US');
+  assert.equal(prefs.webrtc.ip_handling_policy, 'disable_non_proxied_udp');
+});

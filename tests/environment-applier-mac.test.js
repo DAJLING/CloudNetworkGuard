@@ -58,9 +58,10 @@ test('captureCurrentState captures mac timezone and browser preferences', async 
 test('isBrowserRunning detects Chrome and Edge with pgrep', async () => {
   const runner = {
     run: async (command, args) => {
-      if (command === 'pgrep' && args.includes('Google Chrome')) return '123\n';
-      if (command === 'pgrep' && args.includes('Microsoft Edge')) return '456\n';
-      return '';
+      assert.equal(command, 'pgrep');
+      if (JSON.stringify(args) === JSON.stringify(['-x', 'Google Chrome'])) return '123\n';
+      if (JSON.stringify(args) === JSON.stringify(['-x', 'Microsoft Edge'])) return '456\n';
+      throw new Error(`unexpected args: ${JSON.stringify(args)}`);
     }
   };
   const applier = new EnvironmentApplierMac({ platform: 'darwin', runner });
@@ -91,4 +92,33 @@ test('patchBrowserPreferences updates intl and WebRTC fields atomically', () => 
   const prefs = JSON.parse(files[prefsPath]);
   assert.equal(prefs.intl.accept_languages, 'en-US');
   assert.equal(prefs.webrtc.ip_handling_policy, 'disable_non_proxied_udp');
+});
+
+test('patchBrowserPreferences preserves existing preference file mode', () => {
+  const prefsPath = '/tmp/Preferences';
+  const files = {
+    [prefsPath]: JSON.stringify({ intl: { accept_languages: 'zh-CN,zh' } })
+  };
+  const fsImpl = {
+    ...memoryFs(files),
+    statSync: (filePath) => {
+      assert.equal(filePath, prefsPath);
+      return { mode: 0o100600 };
+    },
+    chmodSync: (filePath, mode) => {
+      fsImpl.calls.push({ method: 'chmodSync', filePath, mode });
+    }
+  };
+  const applier = new EnvironmentApplierMac({ platform: 'darwin', fsImpl });
+
+  applier.patchBrowserPreferences(prefsPath, {
+    acceptLanguages: 'en-US'
+  });
+
+  assert.deepEqual(
+    fsImpl.calls.map((call) => call.method),
+    ['writeFileSync', 'renameSync', 'chmodSync']
+  );
+  assert.equal(fsImpl.calls[2].filePath, prefsPath);
+  assert.equal(fsImpl.calls[2].mode, 0o100600);
 });

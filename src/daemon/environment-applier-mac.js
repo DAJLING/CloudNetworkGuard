@@ -124,6 +124,10 @@ class EnvironmentApplierMac {
 
   patchBrowserPreferences(preferencesPath, { acceptLanguages = null, webRtcPolicy = null }) {
     if (!this.fs.existsSync(preferencesPath)) throw new Error('PREFERENCES_NOT_FOUND');
+    const originalMode =
+      typeof this.fs.statSync === 'function' && typeof this.fs.chmodSync === 'function'
+        ? this.fs.statSync(preferencesPath).mode
+        : null;
     const prefs = this.readPreferences(preferencesPath);
     if (acceptLanguages !== null) {
       prefs.intl = prefs.intl || {};
@@ -136,6 +140,9 @@ class EnvironmentApplierMac {
     const tempPath = `${preferencesPath}.ng-tmp`;
     this.fs.writeFileSync(tempPath, JSON.stringify(prefs));
     this.fs.renameSync(tempPath, preferencesPath);
+    if (originalMode !== null) {
+      this.fs.chmodSync(preferencesPath, originalMode);
+    }
   }
 }
 

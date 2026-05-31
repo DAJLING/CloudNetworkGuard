@@ -85,3 +85,54 @@ test('restore fails without backup', async () => {
   assert.equal(result.ok, false);
   assert.equal(result.steps.backup.error, 'BACKUP_NOT_FOUND');
 });
+
+test('service reports supported on darwin when mac applier supports it', () => {
+  const service = new EnvironmentConsistencyService({
+    dataDir: '/tmp',
+    platform: 'darwin',
+    backupStore: { getSummary: () => ({ hasBackup: false, createdAt: null }) },
+    applier: { isSupported: () => true }
+  });
+
+  assert.equal(service.isSupported(), true);
+});
+
+test('darwin apply creates backup and returns restartRequired', async () => {
+  let saved = false;
+  const service = new EnvironmentConsistencyService({
+    dataDir: '/tmp',
+    platform: 'darwin',
+    backupStore: {
+      exists: () => false,
+      save: (snapshot) => {
+        saved = true;
+        return snapshot;
+      },
+      getSummary: () => ({ hasBackup: true, createdAt: '2026-05-31T01:00:00.000Z' })
+    },
+    applier: {
+      isSupported: () => true,
+      isBrowserRunning: async () => [],
+      captureCurrentState: async () => ({ version: 1, platform: 'darwin', mac: {} }),
+      applyProfile: async () => ({ ok: true, steps: { 'mac.timezone': { ok: true } } })
+    },
+    resolveProfile: () => ({
+      timeZone: 'America/Los_Angeles',
+      windowsTimeZone: 'Pacific Standard Time',
+      language: 'en-US',
+      languages: ['en-US'],
+      countryCode: 'US',
+      derivedFrom: 'exit-ip'
+    })
+  });
+
+  const result = await service.apply({
+    exitIp: { countryCode: 'US', regionName: 'California' },
+    config: { deriveFromExitIp: true, profileOverride: {} }
+  });
+
+  assert.equal(saved, true);
+  assert.equal(result.ok, true);
+  assert.equal(result.restartRequired, true);
+  assert.equal(result.lastTargetProfile.timeZone, 'America/Los_Angeles');
+});

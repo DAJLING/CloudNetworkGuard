@@ -1,7 +1,13 @@
 const path = require('path');
 const { EnvironmentBackupStore } = require('./environment-backup-store');
 const { EnvironmentApplierWin } = require('./environment-applier-win');
+const { EnvironmentApplierMac } = require('./environment-applier-mac');
 const { resolveEnvironmentProfile } = require('./environment-profile-resolver');
+
+function createPlatformApplier(platform) {
+  if (platform === 'darwin') return new EnvironmentApplierMac({ platform });
+  return new EnvironmentApplierWin({ platform });
+}
 
 class EnvironmentConsistencyService {
   constructor({
@@ -14,13 +20,13 @@ class EnvironmentConsistencyService {
     this.dataDir = dataDir;
     this.backupStore =
       backupStore || new EnvironmentBackupStore(path.join(dataDir, 'environment-backup.json'));
-    this.applier = applier || new EnvironmentApplierWin({ platform });
+    this.applier = applier || createPlatformApplier(platform);
     this.resolveProfile = resolveProfile;
     this.platform = platform;
   }
 
   isSupported() {
-    return this.platform === 'win32' && this.applier.isSupported();
+    return (this.platform === 'win32' || this.platform === 'darwin') && this.applier.isSupported();
   }
 
   getBackupSummary() {
@@ -122,5 +128,6 @@ class EnvironmentConsistencyService {
 }
 
 module.exports = {
-  EnvironmentConsistencyService
+  EnvironmentConsistencyService,
+  createPlatformApplier
 };

@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
+const childProcess = require('child_process');
 const {
   MacCommandRunner,
   quoteShellArg,
@@ -53,4 +55,44 @@ test('writeFilePrivileged writes via a temporary base64 script', async () => {
   assert.match(calls[0].args[1], /base64 --decode/);
   assert.match(calls[0].args[1], /mv/);
   assert.doesNotMatch(calls[0].args[1], /203\.0\.113\.10/);
+});
+
+test('execFilePromise settles once when timeout kills the child', async () => {
+  const modulePath = require.resolve('../src/daemon/macos-command-runner');
+  const originalExecFile = childProcess.execFile;
+  const originalModule = require.cache[modulePath];
+  const multipleResolves = [];
+  const onMultipleResolves = (type) => multipleResolves.push(type);
+
+  process.on('multipleResolves', onMultipleResolves);
+
+  try {
+    delete require.cache[modulePath];
+
+    childProcess.execFile = (command, args, options, callback) => {
+      const child = new EventEmitter();
+      child.kill = () => {
+        setImmediate(() => {
+          callback(new Error('killed'), '', 'killed');
+          child.emit('exit');
+        });
+      };
+      return child;
+    };
+
+    const { execFilePromise } = require('../src/daemon/macos-command-runner');
+
+    await assert.rejects(
+      execFilePromise('sleep', [], { timeoutMs: 1 }),
+      /COMMAND_TIMEOUT/
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(multipleResolves, []);
+  } finally {
+    process.removeListener('multipleResolves', onMultipleResolves);
+    childProcess.execFile = originalExecFile;
+    delete require.cache[modulePath];
+    require.cache[modulePath] = originalModule;
+  }
 });

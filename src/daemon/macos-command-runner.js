@@ -4,11 +4,18 @@ const DEFAULT_TIMEOUT_MS = 45000;
 
 function execFilePromise(command, args = [], options = {}) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer = null;
+
     const child = execFile(
       command,
       args,
       { windowsHide: true, ...options },
       (error, stdout, stderr) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+
         if (error) {
           reject(new Error(String(stderr || stdout || error.message).trim() || error.message));
           return;
@@ -18,7 +25,9 @@ function execFilePromise(command, args = [], options = {}) {
     );
 
     if (options.timeoutMs) {
-      const timer = setTimeout(() => {
+      timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
         child.kill();
         reject(new Error('COMMAND_TIMEOUT'));
       }, options.timeoutMs);

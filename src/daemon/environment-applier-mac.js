@@ -14,6 +14,7 @@ const BROWSER_REGISTRY = {
     preferencesParts: ['Library', 'Application Support', 'Microsoft Edge', 'Default', 'Preferences']
   }
 };
+const REMOVE_PREFERENCE = Symbol('REMOVE_PREFERENCE');
 
 function stepResult(ok, error = null, extra = {}) {
   return { ok, error, ...extra };
@@ -122,6 +123,164 @@ class EnvironmentApplierMac {
     return running;
   }
 
+  async applyProfile(profile, { keepChineseInput = true } = {}) {
+    if (!this.isSupported()) {
+      return { ok: false, steps: { platform: stepResult(false, 'UNSUPPORTED_PLATFORM') } };
+    }
+
+    const running = await this.isBrowserRunning();
+    if (running.length) {
+      return {
+        ok: false,
+        steps: {
+          preflight: stepResult(false, 'BROWSER_RUNNING', { running })
+        }
+      };
+    }
+
+    const steps = {};
+    steps['mac.timezone'] = await this.applyTimeZone(profile.timeZone);
+    if (keepChineseInput) {
+      steps['mac.language'] = stepResult(true, null, { skipped: true, reason: 'KEEP_CHINESE_INPUT' });
+      steps['chrome.language'] = stepResult(true, null, { skipped: true, reason: 'KEEP_CHINESE_INPUT' });
+      steps['edge.language'] = stepResult(true, null, { skipped: true, reason: 'KEEP_CHINESE_INPUT' });
+    } else {
+      steps['mac.language'] = await this.applyLanguage(profile.language, profile.languages);
+      steps['chrome.language'] = await this.applyBrowserLanguage('chrome', profile);
+      steps['edge.language'] = await this.applyBrowserLanguage('edge', profile);
+    }
+    steps['chrome.webrtc'] = await this.applyBrowserWebRtc('chrome');
+    steps['edge.webrtc'] = await this.applyBrowserWebRtc('edge');
+
+    const ok = Object.values(steps).every((step) => step.ok);
+    return { ok, steps, keepChineseInput };
+  }
+
+  async restoreFromBackup(backup) {
+    if (!this.isSupported() || backup.platform !== 'darwin') {
+      return { ok: false, steps: { platform: stepResult(false, 'UNSUPPORTED_PLATFORM') } };
+    }
+
+    const running = await this.isBrowserRunning();
+    if (running.length) {
+      return {
+        ok: false,
+        steps: {
+          preflight: stepResult(false, 'BROWSER_RUNNING', { running })
+        }
+      };
+    }
+
+    const steps = {};
+    if (backup.mac) {
+      steps['mac.timezone'] = await this.applyTimeZone(backup.mac.timeZone);
+      steps['mac.language'] = await this.restoreLanguage(backup.mac);
+    }
+    steps['chrome.language'] = await this.restoreBrowserLanguage('chrome', backup.chrome);
+    steps['chrome.webrtc'] = await this.restoreBrowserWebRtc('chrome', backup.chrome);
+    steps['edge.language'] = await this.restoreBrowserLanguage('edge', backup.edge);
+    steps['edge.webrtc'] = await this.restoreBrowserWebRtc('edge', backup.edge);
+
+    const ok = Object.values(steps).every((step) => step.ok);
+    return { ok, steps };
+  }
+
+  async applyTimeZone(timeZone) {
+    try {
+      await this.runner.runPrivilegedCommands([['systemsetup', '-settimezone', timeZone]]);
+      return stepResult(true);
+    } catch (error) {
+      return stepResult(false, error.message);
+    }
+  }
+
+  async applyLanguage(language, languages = []) {
+    try {
+      const primary = language || 'en-US';
+      const list = languages.length ? languages : [primary];
+      await this.runner.run('defaults', ['write', 'NSGlobalDomain', 'AppleLanguages', '-array', ...list]);
+      await this.runner.run('defaults', ['write', 'NSGlobalDomain', 'AppleLocale', localeFromLanguage(primary)]);
+      return stepResult(true);
+    } catch (error) {
+      return stepResult(false, error.message);
+    }
+  }
+
+  async restoreLanguage(macBackup = {}) {
+    try {
+      const languages = Array.isArray(macBackup.appleLanguages) ? macBackup.appleLanguages : [];
+      if (languages.length) {
+        await this.runner.run('defaults', ['write', 'NSGlobalDomain', 'AppleLanguages', '-array', ...languages]);
+      }
+      if (macBackup.appleLocale) {
+        await this.runner.run('defaults', ['write', 'NSGlobalDomain', 'AppleLocale', macBackup.appleLocale]);
+      }
+      return stepResult(true);
+    } catch (error) {
+      return stepResult(false, error.message);
+    }
+  }
+
+  async applyBrowserLanguage(browserId, profile) {
+    const preferencesPath = this.getBrowserPreferencesPath(browserId);
+    if (!this.fs.existsSync(preferencesPath)) {
+      return stepResult(true, null, { skipped: true, reason: 'NOT_INSTALLED' });
+    }
+    try {
+      const languages = Array.isArray(profile.languages) ? profile.languages : [];
+      const acceptLanguages = languages.join(',') || profile.language;
+      this.patchBrowserPreferences(preferencesPath, { acceptLanguages });
+      return stepResult(true);
+    } catch (error) {
+      return stepResult(false, error.message);
+    }
+  }
+
+  async applyBrowserWebRtc(browserId) {
+    const preferencesPath = this.getBrowserPreferencesPath(browserId);
+    if (!this.fs.existsSync(preferencesPath)) {
+      return stepResult(true, null, { skipped: true, reason: 'NOT_INSTALLED' });
+    }
+    try {
+      this.patchBrowserPreferences(preferencesPath, { webRtcPolicy: WEBRTC_POLICY });
+      return stepResult(true);
+    } catch (error) {
+      return stepResult(false, error.message);
+    }
+  }
+
+  async restoreBrowserLanguage(browserId, backupSection = {}) {
+    if (!backupSection || !backupSection.installed) {
+      return stepResult(true, null, { skipped: true, reason: 'NOT_INSTALLED' });
+    }
+    const preferencesPath = backupSection.preferencesPath || this.getBrowserPreferencesPath(browserId);
+    try {
+      if (backupSection.intlAcceptLanguages) {
+        this.patchBrowserPreferences(preferencesPath, { acceptLanguages: backupSection.intlAcceptLanguages });
+      }
+      return stepResult(true);
+    } catch (error) {
+      return stepResult(false, error.message);
+    }
+  }
+
+  async restoreBrowserWebRtc(browserId, backupSection = {}) {
+    if (!backupSection || !backupSection.installed) {
+      return stepResult(true, null, { skipped: true, reason: 'NOT_INSTALLED' });
+    }
+    const preferencesPath = backupSection.preferencesPath || this.getBrowserPreferencesPath(browserId);
+    try {
+      const webRtcPolicy =
+        backupSection.webrtcPreference === null || backupSection.webrtcPreference === undefined
+          ? REMOVE_PREFERENCE
+          : backupSection.webrtcPreference;
+      this.patchBrowserPreferences(preferencesPath, { webRtcPolicy });
+      return stepResult(true);
+    } catch (error) {
+      return stepResult(false, error.message);
+    }
+  }
+
   patchBrowserPreferences(preferencesPath, { acceptLanguages = null, webRtcPolicy = null }) {
     if (!this.fs.existsSync(preferencesPath)) throw new Error('PREFERENCES_NOT_FOUND');
     const originalMode =
@@ -134,8 +293,12 @@ class EnvironmentApplierMac {
       prefs.intl.accept_languages = acceptLanguages;
     }
     if (webRtcPolicy !== null) {
-      prefs.webrtc = prefs.webrtc || {};
-      prefs.webrtc.ip_handling_policy = webRtcPolicy;
+      if (webRtcPolicy === REMOVE_PREFERENCE) {
+        if (prefs.webrtc) delete prefs.webrtc.ip_handling_policy;
+      } else {
+        prefs.webrtc = prefs.webrtc || {};
+        prefs.webrtc.ip_handling_policy = webRtcPolicy;
+      }
     }
     const tempPath = `${preferencesPath}.ng-tmp`;
     this.fs.writeFileSync(tempPath, JSON.stringify(prefs));

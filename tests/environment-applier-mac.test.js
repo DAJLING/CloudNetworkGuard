@@ -129,3 +129,127 @@ test('patchBrowserPreferences preserves existing preference file mode', () => {
   assert.equal(fsImpl.calls[2].from, `${prefsPath}.ng-tmp`);
   assert.equal(fsImpl.calls[2].to, prefsPath);
 });
+
+test('applyProfile applies timezone and skips language when keeping Chinese input', async () => {
+  const privileged = [];
+  const runner = {
+    run: async () => '',
+    runPrivilegedCommands: async (commands) => {
+      privileged.push(commands);
+      return '';
+    }
+  };
+  const applier = new EnvironmentApplierMac({
+    platform: 'darwin',
+    runner,
+    fsImpl: memoryFs({})
+  });
+  applier.isBrowserRunning = async () => [];
+
+  const result = await applier.applyProfile(
+    { timeZone: 'America/Chicago', language: 'en-US', languages: ['en-US'] },
+    { keepChineseInput: true }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.steps['mac.timezone'].ok, true);
+  assert.equal(result.steps['mac.language'].skipped, true);
+  assert.equal(result.steps['mac.language'].reason, 'KEEP_CHINESE_INPUT');
+  assert.deepEqual(privileged[0], [['systemsetup', '-settimezone', 'America/Chicago']]);
+});
+
+test('applyProfile patches browser language when keepChineseInput is false', async () => {
+  const homeDir = '/Users/alice';
+  const chromePrefs = path.join(homeDir, 'Library', 'Application Support', 'Google', 'Chrome', 'Default', 'Preferences');
+  const edgePrefs = path.join(homeDir, 'Library', 'Application Support', 'Microsoft Edge', 'Default', 'Preferences');
+  const files = {
+    [chromePrefs]: JSON.stringify({ intl: { accept_languages: 'zh-CN,zh' } }),
+    [edgePrefs]: JSON.stringify({})
+  };
+  const runner = {
+    run: async () => '',
+    runPrivilegedCommands: async () => ''
+  };
+  const applier = new EnvironmentApplierMac({
+    platform: 'darwin',
+    homeDir,
+    runner,
+    fsImpl: memoryFs(files)
+  });
+  applier.isBrowserRunning = async () => [];
+
+  const result = await applier.applyProfile(
+    { timeZone: 'Europe/London', language: 'en-GB', languages: ['en-GB'] },
+    { keepChineseInput: false }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.steps['mac.language'].ok, true);
+  assert.equal(JSON.parse(files[chromePrefs]).intl.accept_languages, 'en-GB');
+  assert.equal(JSON.parse(files[edgePrefs]).webrtc.ip_handling_policy, 'disable_non_proxied_udp');
+});
+
+test('applyProfile fails fast when browsers are running', async () => {
+  const applier = new EnvironmentApplierMac({ platform: 'darwin' });
+  applier.isBrowserRunning = async () => ['chrome', 'edge'];
+
+  const result = await applier.applyProfile({
+    timeZone: 'America/New_York',
+    language: 'en-US',
+    languages: ['en-US']
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.steps.preflight.error, 'BROWSER_RUNNING');
+  assert.deepEqual(result.steps.preflight.running, ['chrome', 'edge']);
+});
+
+test('restoreFromBackup restores timezone, language, and browser preferences', async () => {
+  const homeDir = '/Users/alice';
+  const chromePrefs = path.join(homeDir, 'Library', 'Application Support', 'Google', 'Chrome', 'Default', 'Preferences');
+  const files = {
+    [chromePrefs]: JSON.stringify({
+      intl: { accept_languages: 'en-US' },
+      webrtc: { ip_handling_policy: 'disable_non_proxied_udp' }
+    })
+  };
+  const privileged = [];
+  const runner = {
+    run: async () => '',
+    runPrivilegedCommands: async (commands) => {
+      privileged.push(commands);
+      return '';
+    }
+  };
+  const applier = new EnvironmentApplierMac({
+    platform: 'darwin',
+    homeDir,
+    runner,
+    fsImpl: memoryFs(files)
+  });
+  applier.isBrowserRunning = async () => [];
+
+  const result = await applier.restoreFromBackup({
+    platform: 'darwin',
+    mac: {
+      timeZone: 'Asia/Shanghai',
+      appleLanguages: ['zh-Hans-CN', 'en-US'],
+      appleLocale: 'zh_CN'
+    },
+    chrome: {
+      installed: true,
+      preferencesPath: chromePrefs,
+      intlAcceptLanguages: 'zh-CN,zh',
+      webrtcPreference: null
+    },
+    edge: { installed: false }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.steps['mac.timezone'].ok, true);
+  assert.equal(result.steps['mac.language'].ok, true);
+  assert.deepEqual(privileged[0], [['systemsetup', '-settimezone', 'Asia/Shanghai']]);
+  const prefs = JSON.parse(files[chromePrefs]);
+  assert.equal(prefs.intl.accept_languages, 'zh-CN,zh');
+  assert.equal(prefs.webrtc.ip_handling_policy, undefined);
+});

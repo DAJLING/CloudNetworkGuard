@@ -37,6 +37,11 @@ function localeFromLanguage(language) {
   return normalized || 'en_US';
 }
 
+function isMissingDefaultsKeyError(error) {
+  const message = String((error && (error.stderr || error.message)) || error || '');
+  return /not found|does not exist|could not delete/i.test(message);
+}
+
 class EnvironmentApplierMac {
   constructor({
     platform = process.platform,
@@ -217,6 +222,10 @@ class EnvironmentApplierMac {
       }
       if (macBackup.appleLocale) {
         await this.runner.run('defaults', ['write', 'NSGlobalDomain', 'AppleLocale', macBackup.appleLocale]);
+      } else {
+        await this.runner.run('defaults', ['delete', 'NSGlobalDomain', 'AppleLocale']).catch((error) => {
+          if (!isMissingDefaultsKeyError(error)) throw error;
+        });
       }
       return stepResult(true);
     } catch (error) {

@@ -199,6 +199,24 @@ test('applyLanguage derives AppleLocale from first language written', async () =
   ]);
 });
 
+test('restoreLanguage deletes AppleLocale when original locale was absent', async () => {
+  const commands = [];
+  const runner = {
+    run: async (command, args) => {
+      commands.push([command, args]);
+      return '';
+    }
+  };
+  const applier = new EnvironmentApplierMac({ platform: 'darwin', runner });
+
+  const result = await applier.restoreLanguage({ appleLanguages: [], appleLocale: '' });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(commands, [
+    ['defaults', ['delete', 'NSGlobalDomain', 'AppleLocale']]
+  ]);
+});
+
 test('applyProfile patches browser language when keepChineseInput is false', async () => {
   const homeDir = '/Users/alice';
   const chromePrefs = path.join(homeDir, 'Library', 'Application Support', 'Google', 'Chrome', 'Default', 'Preferences');

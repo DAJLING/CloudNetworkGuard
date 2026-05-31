@@ -117,8 +117,10 @@ test('patchBrowserPreferences preserves existing preference file mode', () => {
 
   assert.deepEqual(
     fsImpl.calls.map((call) => call.method),
-    ['writeFileSync', 'renameSync', 'chmodSync']
+    ['writeFileSync', 'chmodSync', 'renameSync']
   );
-  assert.equal(fsImpl.calls[2].filePath, prefsPath);
-  assert.equal(fsImpl.calls[2].mode, 0o100600);
+  assert.equal(fsImpl.calls[1].filePath, `${prefsPath}.ng-tmp`);
+  assert.equal(fsImpl.calls[1].mode, 0o100600);
+  assert.equal(fsImpl.calls[2].from, `${prefsPath}.ng-tmp`);
+  assert.equal(fsImpl.calls[2].to, prefsPath);
 });

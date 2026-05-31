@@ -139,10 +139,10 @@ class EnvironmentApplierMac {
     }
     const tempPath = `${preferencesPath}.ng-tmp`;
     this.fs.writeFileSync(tempPath, JSON.stringify(prefs));
-    this.fs.renameSync(tempPath, preferencesPath);
     if (originalMode !== null) {
-      this.fs.chmodSync(preferencesPath, originalMode);
+      this.fs.chmodSync(tempPath, originalMode);
     }
+    this.fs.renameSync(tempPath, preferencesPath);
   }
 }
 

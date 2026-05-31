@@ -266,6 +266,9 @@ class EnvironmentApplierMac {
       return stepResult(true, null, { skipped: true, reason: 'NOT_INSTALLED' });
     }
     const preferencesPath = backupSection.preferencesPath || this.getBrowserPreferencesPath(browserId);
+    if (!this.fs.existsSync(preferencesPath)) {
+      return stepResult(true, null, { skipped: true, reason: 'PREFERENCES_NOT_FOUND' });
+    }
     try {
       if (Object.prototype.hasOwnProperty.call(backupSection, 'intlAcceptLanguages')) {
         const acceptLanguages =
@@ -285,6 +288,9 @@ class EnvironmentApplierMac {
       return stepResult(true, null, { skipped: true, reason: 'NOT_INSTALLED' });
     }
     const preferencesPath = backupSection.preferencesPath || this.getBrowserPreferencesPath(browserId);
+    if (!this.fs.existsSync(preferencesPath)) {
+      return stepResult(true, null, { skipped: true, reason: 'PREFERENCES_NOT_FOUND' });
+    }
     try {
       const webRtcPolicy =
         backupSection.webrtcPreference === null || backupSection.webrtcPreference === undefined

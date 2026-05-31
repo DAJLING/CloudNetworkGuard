@@ -376,3 +376,42 @@ test('restoreFromBackup removes browser language when original preference was ab
   const prefs = JSON.parse(files[chromePrefs]);
   assert.equal(prefs.intl.accept_languages, undefined);
 });
+
+test('restoreFromBackup skips browser restore when backed-up preferences are now missing', async () => {
+  const homeDir = '/Users/alice';
+  const chromePrefs = path.join(homeDir, 'Library', 'Application Support', 'Google', 'Chrome', 'Default', 'Preferences');
+  const runner = {
+    run: async () => '',
+    runPrivilegedCommands: async () => ''
+  };
+  const fsImpl = memoryFs({});
+  const applier = new EnvironmentApplierMac({
+    platform: 'darwin',
+    homeDir,
+    runner,
+    fsImpl
+  });
+  applier.isBrowserRunning = async () => [];
+
+  const result = await applier.restoreFromBackup({
+    platform: 'darwin',
+    chrome: {
+      installed: true,
+      preferencesPath: chromePrefs,
+      intlAcceptLanguages: 'zh-CN,zh',
+      webrtcPreference: 'default'
+    },
+    edge: { installed: false }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.steps['chrome.language'].ok, true);
+  assert.equal(result.steps['chrome.language'].skipped, true);
+  assert.equal(result.steps['chrome.language'].reason, 'PREFERENCES_NOT_FOUND');
+  assert.equal(result.steps['chrome.webrtc'].ok, true);
+  assert.equal(result.steps['chrome.webrtc'].skipped, true);
+  assert.equal(result.steps['chrome.webrtc'].reason, 'PREFERENCES_NOT_FOUND');
+  assert.equal(result.steps['edge.language'].reason, 'NOT_INSTALLED');
+  assert.equal(result.steps['edge.webrtc'].reason, 'NOT_INSTALLED');
+  assert.deepEqual(fsImpl.calls, []);
+});

@@ -53,7 +53,12 @@ test('writeFilePrivileged writes via a temporary base64 script', async () => {
 
   assert.equal(calls[0].command, 'osascript');
   assert.match(calls[0].args[1], /base64 --decode/);
-  assert.match(calls[0].args[1], /mv/);
+  assert.ok(
+    calls[0].args[1].includes("base64 --decode > '/etc/pf.anchors/example.network-guard-tmp'")
+  );
+  assert.ok(
+    calls[0].args[1].includes("mv '/etc/pf.anchors/example.network-guard-tmp' '/etc/pf.anchors/example'")
+  );
   assert.doesNotMatch(calls[0].args[1], /203\.0\.113\.10/);
 });
 

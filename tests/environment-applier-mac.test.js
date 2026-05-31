@@ -4,13 +4,17 @@ const path = require('path');
 const { EnvironmentApplierMac } = require('../src/daemon/environment-applier-mac');
 
 function memoryFs(files = {}) {
+  const calls = [];
   return {
+    calls,
     existsSync: (filePath) => Object.prototype.hasOwnProperty.call(files, filePath),
     readFileSync: (filePath) => files[filePath],
     writeFileSync: (filePath, content) => {
+      calls.push({ method: 'writeFileSync', filePath, content });
       files[filePath] = content;
     },
     renameSync: (from, to) => {
+      calls.push({ method: 'renameSync', from, to });
       files[to] = files[from];
       delete files[from];
     },
@@ -55,13 +59,13 @@ test('isBrowserRunning detects Chrome and Edge with pgrep', async () => {
   const runner = {
     run: async (command, args) => {
       if (command === 'pgrep' && args.includes('Google Chrome')) return '123\n';
-      if (command === 'pgrep' && args.includes('Microsoft Edge')) throw new Error('not running');
+      if (command === 'pgrep' && args.includes('Microsoft Edge')) return '456\n';
       return '';
     }
   };
   const applier = new EnvironmentApplierMac({ platform: 'darwin', runner });
 
-  assert.deepEqual(await applier.isBrowserRunning(), ['chrome']);
+  assert.deepEqual(await applier.isBrowserRunning(), ['chrome', 'edge']);
 });
 
 test('patchBrowserPreferences updates intl and WebRTC fields atomically', () => {
@@ -69,13 +73,21 @@ test('patchBrowserPreferences updates intl and WebRTC fields atomically', () => 
   const files = {
     [prefsPath]: JSON.stringify({ intl: { accept_languages: 'zh-CN,zh' } })
   };
-  const applier = new EnvironmentApplierMac({ platform: 'darwin', fsImpl: memoryFs(files) });
+  const fsImpl = memoryFs(files);
+  const applier = new EnvironmentApplierMac({ platform: 'darwin', fsImpl });
 
   applier.patchBrowserPreferences(prefsPath, {
     acceptLanguages: 'en-US',
     webRtcPolicy: 'disable_non_proxied_udp'
   });
 
+  assert.deepEqual(
+    fsImpl.calls.map((call) => call.method),
+    ['writeFileSync', 'renameSync']
+  );
+  assert.equal(fsImpl.calls[0].filePath, `${prefsPath}.ng-tmp`);
+  assert.equal(fsImpl.calls[1].from, `${prefsPath}.ng-tmp`);
+  assert.equal(fsImpl.calls[1].to, prefsPath);
   const prefs = JSON.parse(files[prefsPath]);
   assert.equal(prefs.intl.accept_languages, 'en-US');
   assert.equal(prefs.webrtc.ip_handling_policy, 'disable_non_proxied_udp');

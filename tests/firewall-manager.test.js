@@ -21,3 +21,35 @@ test('hosts block renderer includes stable markers and target domains', () => {
   assert.equal(block.includes(HOSTS_BLOCK_END), true);
   assert.equal(manager.removeHostsBlock(`before\n${block}\nafter`), 'before\nafter');
 });
+
+test('renderPfBlockRule renders IPv4 and IPv6 target set', () => {
+  const { renderPfBlockRule } = require('../src/daemon/firewall-manager');
+  assert.equal(
+    renderPfBlockRule(['203.0.113.10', '2001:db8::10']),
+    'block drop out quick to { 203.0.113.10, 2001:db8::10 }'
+  );
+});
+
+test('renderPfBlockRule rejects invalid IP literals', () => {
+  const { renderPfBlockRule } = require('../src/daemon/firewall-manager');
+  assert.throws(() => renderPfBlockRule(['api.openai.com']), /INVALID_PF_IP/);
+});
+
+test('ensurePfAnchorBlock adds one marked anchor block', () => {
+  const { ensurePfAnchorBlock, PF_CONF_BLOCK_START, PF_CONF_BLOCK_END } = require('../src/daemon/firewall-manager');
+  const once = ensurePfAnchorBlock('set skip on lo0\n');
+  const twice = ensurePfAnchorBlock(once);
+
+  assert.match(once, new RegExp(PF_CONF_BLOCK_START));
+  assert.match(once, /anchor "com\.local\.claude-codex-network-guard"/);
+  assert.match(once, /load anchor "com\.local\.claude-codex-network-guard"/);
+  assert.match(once, new RegExp(PF_CONF_BLOCK_END));
+  assert.equal(twice, once);
+});
+
+test('removePfAnchorBlock removes only the marked block', () => {
+  const { ensurePfAnchorBlock, removePfAnchorBlock } = require('../src/daemon/firewall-manager');
+  const patched = ensurePfAnchorBlock('set skip on lo0\npass out all\n');
+
+  assert.equal(removePfAnchorBlock(patched), 'set skip on lo0\npass out all\n');
+});

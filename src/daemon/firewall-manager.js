@@ -18,6 +18,11 @@ const FIREWALL_TARGET_HOSTS = [
 ];
 const HOSTS_BLOCK_START = '# ClaudeCodexNetworkGuard START';
 const HOSTS_BLOCK_END = '# ClaudeCodexNetworkGuard END';
+const PF_ANCHOR_NAME = 'com.local.claude-codex-network-guard';
+const PF_ANCHOR_PATH = `/etc/pf.anchors/${PF_ANCHOR_NAME}`;
+const PF_CONF_PATH = '/etc/pf.conf';
+const PF_CONF_BLOCK_START = '# ClaudeCodexNetworkGuard START';
+const PF_CONF_BLOCK_END = '# ClaudeCodexNetworkGuard END';
 
 function execFilePromise(command, args) {
   return new Promise((resolve, reject) => {
@@ -33,6 +38,39 @@ function execFilePromise(command, args) {
 
 function sanitizeRuleName(value) {
   return String(value).replace(/[^a-zA-Z0-9_.:-]/g, '_');
+}
+
+function isValidIpLiteral(value) {
+  const text = String(value || '').trim();
+  if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(text)) {
+    return text.split('.').every((part) => Number(part) >= 0 && Number(part) <= 255);
+  }
+  return /^[0-9a-fA-F:]+$/.test(text) && text.includes(':');
+}
+
+function renderPfBlockRule(ips = []) {
+  const unique = Array.from(new Set(ips.map((ip) => String(ip || '').trim()).filter(Boolean)));
+  if (!unique.length) throw new Error('PF_IPS_EMPTY');
+  for (const ip of unique) {
+    if (!isValidIpLiteral(ip)) throw new Error(`INVALID_PF_IP:${ip}`);
+  }
+  return `block drop out quick to { ${unique.join(', ')} }`;
+}
+
+function removePfAnchorBlock(content = '') {
+  const pattern = new RegExp(`${PF_CONF_BLOCK_START}[\\s\\S]*?${PF_CONF_BLOCK_END}\\r?\\n?`, 'g');
+  return String(content || '').replace(pattern, '');
+}
+
+function ensurePfAnchorBlock(content = '') {
+  const cleaned = removePfAnchorBlock(content);
+  const block = [
+    PF_CONF_BLOCK_START,
+    `anchor "${PF_ANCHOR_NAME}"`,
+    `load anchor "${PF_ANCHOR_NAME}" from "${PF_ANCHOR_PATH}"`,
+    PF_CONF_BLOCK_END
+  ].join('\n');
+  return `${cleaned.replace(/\s+$/g, '')}${cleaned.trim() ? '\n' : ''}${block}\n`;
 }
 
 async function isWindowsElevated(execFileImpl = execFilePromise) {
@@ -257,6 +295,15 @@ module.exports = {
   FIREWALL_TARGET_HOSTS,
   HOSTS_BLOCK_START,
   HOSTS_BLOCK_END,
+  PF_ANCHOR_NAME,
+  PF_ANCHOR_PATH,
+  PF_CONF_PATH,
+  PF_CONF_BLOCK_START,
+  PF_CONF_BLOCK_END,
+  renderPfBlockRule,
+  ensurePfAnchorBlock,
+  removePfAnchorBlock,
+  isValidIpLiteral,
   resolveTargetIps,
   isWindowsElevated,
   FirewallManager

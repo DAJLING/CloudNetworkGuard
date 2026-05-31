@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
+const { isDeepStrictEqual } = require('node:util');
 const { EnvironmentApplierMac, localeFromLanguage } = require('../src/daemon/environment-applier-mac');
 
 function memoryFs(files = {}) {
@@ -234,8 +235,20 @@ test('restoreFromBackup restores timezone, language, and browser preferences', a
     })
   };
   const privileged = [];
+  const commands = [];
+  const expectedCommands = [
+    ['defaults', ['write', 'NSGlobalDomain', 'AppleLanguages', '-array', 'zh-Hans-CN', 'en-US']],
+    ['defaults', ['write', 'NSGlobalDomain', 'AppleLocale', 'zh_CN']]
+  ];
   const runner = {
-    run: async () => '',
+    run: async (command, args) => {
+      const call = [command, args];
+      commands.push(call);
+      if (expectedCommands.some((expected) => isDeepStrictEqual(expected, call))) {
+        return '';
+      }
+      throw new Error(`unexpected command: ${command} ${args.join(' ')}`);
+    },
     runPrivilegedCommands: async (commands) => {
       privileged.push(commands);
       return '';
@@ -269,6 +282,7 @@ test('restoreFromBackup restores timezone, language, and browser preferences', a
   assert.equal(result.steps['mac.timezone'].ok, true);
   assert.equal(result.steps['mac.language'].ok, true);
   assert.deepEqual(privileged[0], [['systemsetup', '-settimezone', 'Asia/Shanghai']]);
+  assert.deepEqual(commands, expectedCommands);
   const prefs = JSON.parse(files[chromePrefs]);
   assert.equal(prefs.intl.accept_languages, 'zh-CN,zh');
   assert.equal(prefs.webrtc.ip_handling_policy, undefined);

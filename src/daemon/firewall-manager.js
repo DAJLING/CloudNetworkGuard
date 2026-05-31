@@ -1,5 +1,6 @@
 const dns = require('dns').promises;
 const fs = require('fs');
+const net = require('net');
 const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
@@ -42,10 +43,7 @@ function sanitizeRuleName(value) {
 
 function isValidIpLiteral(value) {
   const text = String(value || '').trim();
-  if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(text)) {
-    return text.split('.').every((part) => Number(part) >= 0 && Number(part) <= 255);
-  }
-  return /^[0-9a-fA-F:]+$/.test(text) && text.includes(':');
+  return net.isIP(text) !== 0;
 }
 
 function renderPfBlockRule(ips = []) {

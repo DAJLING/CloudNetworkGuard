@@ -32,7 +32,9 @@ test('renderPfBlockRule renders IPv4 and IPv6 target set', () => {
 
 test('renderPfBlockRule rejects invalid IP literals', () => {
   const { renderPfBlockRule } = require('../src/daemon/firewall-manager');
-  assert.throws(() => renderPfBlockRule(['api.openai.com']), /INVALID_PF_IP/);
+  for (const value of ['api.openai.com', '::::', 'abc:def', '1:2:3:4:5:6:7:8:9']) {
+    assert.throws(() => renderPfBlockRule([value]), /INVALID_PF_IP/);
+  }
 });
 
 test('ensurePfAnchorBlock adds one marked anchor block', () => {

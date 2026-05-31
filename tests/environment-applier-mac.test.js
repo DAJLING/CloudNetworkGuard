@@ -163,6 +163,42 @@ test('applyProfile applies timezone and skips language when keeping Chinese inpu
   assert.deepEqual(privileged[0], [['systemsetup', '-settimezone', 'America/Chicago']]);
 });
 
+test('applyTimeZone rejects empty timezone before privileged mutation', async () => {
+  const privileged = [];
+  const runner = {
+    runPrivilegedCommands: async (commands) => {
+      privileged.push(commands);
+      throw new Error('unexpected privileged command');
+    }
+  };
+  const applier = new EnvironmentApplierMac({ platform: 'darwin', runner });
+
+  const result = await applier.applyTimeZone('');
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'TIMEZONE_EMPTY');
+  assert.deepEqual(privileged, []);
+});
+
+test('applyLanguage derives AppleLocale from first language written', async () => {
+  const commands = [];
+  const runner = {
+    run: async (command, args) => {
+      commands.push([command, args]);
+      return '';
+    }
+  };
+  const applier = new EnvironmentApplierMac({ platform: 'darwin', runner });
+
+  const result = await applier.applyLanguage('en-US', ['fr-FR']);
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(commands, [
+    ['defaults', ['write', 'NSGlobalDomain', 'AppleLanguages', '-array', 'fr-FR']],
+    ['defaults', ['write', 'NSGlobalDomain', 'AppleLocale', 'fr_FR']]
+  ]);
+});
+
 test('applyProfile patches browser language when keepChineseInput is false', async () => {
   const homeDir = '/Users/alice';
   const chromePrefs = path.join(homeDir, 'Library', 'Application Support', 'Google', 'Chrome', 'Default', 'Preferences');
@@ -286,4 +322,39 @@ test('restoreFromBackup restores timezone, language, and browser preferences', a
   const prefs = JSON.parse(files[chromePrefs]);
   assert.equal(prefs.intl.accept_languages, 'zh-CN,zh');
   assert.equal(prefs.webrtc.ip_handling_policy, undefined);
+});
+
+test('restoreFromBackup removes browser language when original preference was absent', async () => {
+  const homeDir = '/Users/alice';
+  const chromePrefs = path.join(homeDir, 'Library', 'Application Support', 'Google', 'Chrome', 'Default', 'Preferences');
+  const files = {
+    [chromePrefs]: JSON.stringify({
+      intl: { accept_languages: 'en-US' }
+    })
+  };
+  const runner = {
+    run: async () => '',
+    runPrivilegedCommands: async () => ''
+  };
+  const applier = new EnvironmentApplierMac({
+    platform: 'darwin',
+    homeDir,
+    runner,
+    fsImpl: memoryFs(files)
+  });
+  applier.isBrowserRunning = async () => [];
+
+  const result = await applier.restoreFromBackup({
+    platform: 'darwin',
+    chrome: {
+      installed: true,
+      preferencesPath: chromePrefs,
+      intlAcceptLanguages: null
+    },
+    edge: { installed: false }
+  });
+
+  assert.equal(result.ok, true);
+  const prefs = JSON.parse(files[chromePrefs]);
+  assert.equal(prefs.intl.accept_languages, undefined);
 });

@@ -186,6 +186,9 @@ class EnvironmentApplierMac {
   }
 
   async applyTimeZone(timeZone) {
+    if (!String(timeZone || '').trim()) {
+      return stepResult(false, 'TIMEZONE_EMPTY');
+    }
     try {
       await this.runner.runPrivilegedCommands([['systemsetup', '-settimezone', timeZone]]);
       return stepResult(true);
@@ -199,7 +202,7 @@ class EnvironmentApplierMac {
       const primary = language || 'en-US';
       const list = languages.length ? languages : [primary];
       await this.runner.run('defaults', ['write', 'NSGlobalDomain', 'AppleLanguages', '-array', ...list]);
-      await this.runner.run('defaults', ['write', 'NSGlobalDomain', 'AppleLocale', localeFromLanguage(primary)]);
+      await this.runner.run('defaults', ['write', 'NSGlobalDomain', 'AppleLocale', localeFromLanguage(list[0])]);
       return stepResult(true);
     } catch (error) {
       return stepResult(false, error.message);
@@ -255,8 +258,12 @@ class EnvironmentApplierMac {
     }
     const preferencesPath = backupSection.preferencesPath || this.getBrowserPreferencesPath(browserId);
     try {
-      if (backupSection.intlAcceptLanguages) {
-        this.patchBrowserPreferences(preferencesPath, { acceptLanguages: backupSection.intlAcceptLanguages });
+      if (Object.prototype.hasOwnProperty.call(backupSection, 'intlAcceptLanguages')) {
+        const acceptLanguages =
+          backupSection.intlAcceptLanguages === null || backupSection.intlAcceptLanguages === undefined
+            ? REMOVE_PREFERENCE
+            : backupSection.intlAcceptLanguages;
+        this.patchBrowserPreferences(preferencesPath, { acceptLanguages });
       }
       return stepResult(true);
     } catch (error) {
@@ -289,8 +296,12 @@ class EnvironmentApplierMac {
         : null;
     const prefs = this.readPreferences(preferencesPath);
     if (acceptLanguages !== null) {
-      prefs.intl = prefs.intl || {};
-      prefs.intl.accept_languages = acceptLanguages;
+      if (acceptLanguages === REMOVE_PREFERENCE) {
+        if (prefs.intl) delete prefs.intl.accept_languages;
+      } else {
+        prefs.intl = prefs.intl || {};
+        prefs.intl.accept_languages = acceptLanguages;
+      }
     }
     if (webRtcPolicy !== null) {
       if (webRtcPolicy === REMOVE_PREFERENCE) {

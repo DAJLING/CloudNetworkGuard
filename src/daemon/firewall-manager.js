@@ -22,8 +22,8 @@ const HOSTS_BLOCK_END = '# ClaudeCodexNetworkGuard END';
 const PF_ANCHOR_NAME = 'com.local.claude-codex-network-guard';
 const PF_ANCHOR_PATH = `/etc/pf.anchors/${PF_ANCHOR_NAME}`;
 const PF_CONF_PATH = '/etc/pf.conf';
-const PF_CONF_BLOCK_START = '# ClaudeCodexNetworkGuard START';
-const PF_CONF_BLOCK_END = '# ClaudeCodexNetworkGuard END';
+const PF_CONF_BLOCK_START = '# ClaudeCodexNetworkGuard PF START';
+const PF_CONF_BLOCK_END = '# ClaudeCodexNetworkGuard PF END';
 
 function execFilePromise(command, args) {
   return new Promise((resolve, reject) => {
@@ -47,16 +47,23 @@ function isValidIpLiteral(value) {
 }
 
 function renderPfBlockRule(ips = []) {
-  const unique = Array.from(new Set(ips.map((ip) => String(ip || '').trim()).filter(Boolean)));
-  if (!unique.length) throw new Error('PF_IPS_EMPTY');
-  for (const ip of unique) {
+  const normalized = ips.map((ip) => String(ip || '').trim());
+  if (!normalized.length) throw new Error('PF_IPS_EMPTY');
+  for (const ip of normalized) {
     if (!isValidIpLiteral(ip)) throw new Error(`INVALID_PF_IP:${ip}`);
   }
+  const unique = Array.from(new Set(normalized));
   return `block drop out quick to { ${unique.join(', ')} }`;
 }
 
+function escapeRegExpLiteral(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function removePfAnchorBlock(content = '') {
-  const pattern = new RegExp(`${PF_CONF_BLOCK_START}[\\s\\S]*?${PF_CONF_BLOCK_END}\\r?\\n?`, 'g');
+  const start = escapeRegExpLiteral(PF_CONF_BLOCK_START);
+  const end = escapeRegExpLiteral(PF_CONF_BLOCK_END);
+  const pattern = new RegExp(`^[\\t ]*${start}[\\t ]*(?:\\r?\\n|\\r)[\\s\\S]*?^[\\t ]*${end}[\\t ]*(?:\\r?\\n|\\r|$)`, 'gm');
   return String(content || '').replace(pattern, '');
 }
 

@@ -37,11 +37,22 @@ test('renderPfBlockRule rejects invalid IP literals', () => {
   }
 });
 
+test('renderPfBlockRule rejects empty input and blank entries', () => {
+  const { renderPfBlockRule } = require('../src/daemon/firewall-manager');
+
+  assert.throws(() => renderPfBlockRule([]), /PF_IPS_EMPTY/);
+  assert.throws(() => renderPfBlockRule(['   ']), /INVALID_PF_IP/);
+  assert.throws(() => renderPfBlockRule(['203.0.113.10', '']), /INVALID_PF_IP/);
+  assert.throws(() => renderPfBlockRule(['203.0.113.10', '   ']), /INVALID_PF_IP/);
+});
+
 test('ensurePfAnchorBlock adds one marked anchor block', () => {
   const { ensurePfAnchorBlock, PF_CONF_BLOCK_START, PF_CONF_BLOCK_END } = require('../src/daemon/firewall-manager');
   const once = ensurePfAnchorBlock('set skip on lo0\n');
   const twice = ensurePfAnchorBlock(once);
 
+  assert.equal(PF_CONF_BLOCK_START, '# ClaudeCodexNetworkGuard PF START');
+  assert.equal(PF_CONF_BLOCK_END, '# ClaudeCodexNetworkGuard PF END');
   assert.match(once, new RegExp(PF_CONF_BLOCK_START));
   assert.match(once, /anchor "com\.local\.claude-codex-network-guard"/);
   assert.match(once, /load anchor "com\.local\.claude-codex-network-guard"/);
@@ -54,4 +65,30 @@ test('removePfAnchorBlock removes only the marked block', () => {
   const patched = ensurePfAnchorBlock('set skip on lo0\npass out all\n');
 
   assert.equal(removePfAnchorBlock(patched), 'set skip on lo0\npass out all\n');
+});
+
+test('removePfAnchorBlock preserves marker text outside whole marker lines', () => {
+  const { removePfAnchorBlock } = require('../src/daemon/firewall-manager');
+  const content = [
+    'set skip on lo0',
+    'pass out all # ClaudeCodexNetworkGuard PF START',
+    'anchor "other"',
+    '# ClaudeCodexNetworkGuard PF END is mentioned here'
+  ].join('\n');
+
+  assert.equal(removePfAnchorBlock(content), content);
+});
+
+test('removePfAnchorBlock removes marked CRLF anchor block', () => {
+  const { removePfAnchorBlock } = require('../src/daemon/firewall-manager');
+  const content = [
+    'set skip on lo0',
+    '# ClaudeCodexNetworkGuard PF START',
+    'anchor "com.local.claude-codex-network-guard"',
+    'load anchor "com.local.claude-codex-network-guard" from "/etc/pf.anchors/com.local.claude-codex-network-guard"',
+    '# ClaudeCodexNetworkGuard PF END',
+    'pass out all'
+  ].join('\r\n');
+
+  assert.equal(removePfAnchorBlock(`${content}\r\n`), 'set skip on lo0\r\npass out all\r\n');
 });

@@ -77,11 +77,13 @@ class MacCommandRunner {
 
   async writeFilePrivileged(filePath, content) {
     const encoded = Buffer.from(String(content), 'utf8').toString('base64');
-    const tempPath = `${filePath}.network-guard-tmp`;
     const script = [
-      `printf %s ${quoteShellArg(encoded)} | base64 --decode > ${quoteShellArg(tempPath)}`,
-      `mv ${quoteShellArg(tempPath)} ${quoteShellArg(filePath)}`,
-      `chmod 0644 ${quoteShellArg(filePath)}`
+      'tmp=$(/usr/bin/mktemp -t network-guard.XXXXXX)',
+      'trap \'rm -f "$tmp"\' EXIT',
+      `printf %s ${quoteShellArg(encoded)} | base64 --decode > "$tmp"`,
+      `mv "$tmp" ${quoteShellArg(filePath)}`,
+      `chmod 0644 ${quoteShellArg(filePath)}`,
+      'trap - EXIT'
     ].join(' && ');
     return this.runPrivilegedScript(script);
   }

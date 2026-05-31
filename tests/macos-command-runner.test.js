@@ -52,13 +52,16 @@ test('writeFilePrivileged writes via a temporary base64 script', async () => {
   await runner.writeFilePrivileged('/etc/pf.anchors/example', 'block drop out quick to 203.0.113.10\n');
 
   assert.equal(calls[0].command, 'osascript');
+  assert.match(calls[0].args[1], /\/usr\/bin\/mktemp -t network-guard\.XXXXXX/);
+  assert.match(calls[0].args[1], /trap 'rm -f \\"\$tmp\\"' EXIT/);
   assert.match(calls[0].args[1], /base64 --decode/);
+  assert.doesNotMatch(calls[0].args[1], /\/etc\/pf\.anchors\/example\.network-guard-tmp/);
+  assert.match(calls[0].args[1], /base64 --decode > \\"\$tmp\\"/);
   assert.ok(
-    calls[0].args[1].includes("base64 --decode > '/etc/pf.anchors/example.network-guard-tmp'")
+    calls[0].args[1].includes("mv \\\"$tmp\\\" '/etc/pf.anchors/example'")
   );
-  assert.ok(
-    calls[0].args[1].includes("mv '/etc/pf.anchors/example.network-guard-tmp' '/etc/pf.anchors/example'")
-  );
+  assert.ok(calls[0].args[1].includes("chmod 0644 '/etc/pf.anchors/example'"));
+  assert.match(calls[0].args[1], /trap - EXIT/);
   assert.doesNotMatch(calls[0].args[1], /203\.0\.113\.10/);
 });
 

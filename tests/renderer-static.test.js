@@ -152,4 +152,6 @@ test('README documents macOS pf firewall fallback', () => {
   assert.match(readme, /macOS firewall fallback/);
   assert.match(readme, /\/etc\/pf\.anchors\/com\.local\.claude-codex-network-guard/);
   assert.match(readme, /administrator authorization/);
+  assert.match(readme, /Targets view/);
+  assert.match(readme, /Periodic monitoring/);
 });

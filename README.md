@@ -18,7 +18,7 @@ The app provides a one-click guard switch. When enabled, target traffic is route
 
 ## Target Configuration
 
-Guarded Claude/Codex targets are loaded from an editable JSON file named `target-rules.json` in the app data directory. Set `NETWORK_GUARD_TARGET_CONFIG` to point at another file.
+Guarded Claude/Codex targets are loaded from an editable JSON file named `target-rules.json` in the app data directory. Set `NETWORK_GUARD_TARGET_CONFIG` to point at another file. The Targets view can add, edit, delete, and save target rules without manually editing JSON.
 
 On first run the app writes the default Claude, Anthropic, OpenAI, and ChatGPT rules. Edit the `rules` array to add or remove guarded domains or full URLs, then use "重新载入配置" in the app.
 
@@ -62,6 +62,7 @@ npm.cmd run dist:msi
 - Exit IP binding: the first detected exit IP is locally bound by hash; later changes are blocked until state is reset.
 - Claude control check: DNS, TCP, TLS, and Claude web probe failures block guarded traffic.
 - Usage rate check: unusually high target request volume blocks guarded traffic.
+- Periodic monitoring: enable background checks from the Activity view and choose a 1-1440 minute interval.
 - Provider outage or offline checks: fail-closed while the guard is enabled.
 
 ## Platform Notes

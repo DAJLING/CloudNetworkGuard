@@ -77,3 +77,31 @@ test('buildDiagnosticReport includes environment consistency supported flag', ()
   });
   assert.equal(JSON.stringify(report).includes('secret'), false);
 });
+
+test('buildDiagnosticReport includes monitoring platform rule preview and macOS safety notes', () => {
+  const report = buildDiagnosticReport({
+    platform: { os: 'darwin' },
+    monitoring: {
+      enabled: true,
+      intervalMinutes: 5,
+      lastRunAt: '2026-06-05T00:00:00.000Z',
+      lastResult: { verdict: 'PASS', reasons: [] }
+    },
+    firewall: { mode: 'PF_BLOCK', lastError: null },
+    targetConfig: {
+      rules: [
+        { id: 'api', domainPattern: 'api.example.com', action: 'GUARD' },
+        { id: 'docs', domainPattern: 'docs.example.com', action: 'ALLOW' }
+      ],
+      staticResidentialIp: '203.0.113.10'
+    },
+    environmentConsistency: { supported: true }
+  });
+
+  assert.equal(report.monitoring.enabled, true);
+  assert.equal(report.monitoring.intervalMinutes, 5);
+  assert.equal(report.platformCapabilities.firewallFallback, 'macos-pf');
+  assert.deepEqual(report.targetConfig.rulePreview.guardedDomains, ['api.example.com']);
+  assert.equal(JSON.stringify(report).includes('203.0.113.10'), false);
+  assert.match(report.safetyNotes.join(' '), /Emergency restore/);
+});

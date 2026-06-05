@@ -228,6 +228,11 @@ function wireIpc() {
     updateTray();
     return result;
   });
+  ipcMain.handle('guard:set-monitoring-config', (_event, config) => {
+    const status = service.setMonitoringConfig(config || {});
+    updateTray();
+    return status;
+  });
 }
 
 app.whenReady().then(async () => {

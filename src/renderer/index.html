@@ -280,6 +280,26 @@
       </section>
 
       <section id="view-activity" class="view" data-view-panel="activity" hidden>
+        <article class="panel glass-panel monitoring-panel">
+          <div class="panel-title">
+            <div>
+              <span class="eyebrow">Monitoring</span>
+              <h2>周期监控</h2>
+            </div>
+            <button id="saveMonitoring" class="button primary" type="button">保存监控</button>
+          </div>
+          <div class="monitoring-controls">
+            <label class="toggle-row">
+              <span>后台定时检测</span>
+              <input id="monitoringEnabled" type="checkbox" />
+            </label>
+            <label class="field compact" for="monitoringInterval">
+              <span>间隔（分钟）</span>
+              <input id="monitoringInterval" class="text-input" type="number" min="1" max="1440" step="1" value="15" />
+            </label>
+          </div>
+          <small id="monitoringStatus" class="field-message" aria-live="polite">尚未启用周期监控。</small>
+        </article>
         <article class="panel glass-panel">
           <div class="panel-title">
             <div>

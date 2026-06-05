@@ -129,6 +129,23 @@ test('renderer exposes diagnostic report controls', () => {
   assert.match(service, /buildDiagnosticReport/);
 });
 
+test('renderer exposes periodic monitoring controls', () => {
+  const html = readProjectFile('src/renderer/index.html');
+  const renderer = readProjectFile('src/renderer/renderer.js');
+  const preload = readProjectFile('src/main/preload.js');
+  const main = readProjectFile('src/main/main.js');
+
+  assert.match(html, /id="monitoringEnabled"/);
+  assert.match(html, /id="monitoringInterval"/);
+  assert.match(html, /id="saveMonitoring"/);
+  assert.match(html, /id="monitoringStatus"/);
+  assert.match(renderer, /renderMonitoring/);
+  assert.match(renderer, /readMonitoringConfig/);
+  assert.match(renderer, /networkGuard\.setMonitoringConfig/);
+  assert.match(preload, /setMonitoringConfig: \(config\) => ipcRenderer\.invoke\('guard:set-monitoring-config', config\)/);
+  assert.match(main, /ipcMain\.handle\('guard:set-monitoring-config'/);
+});
+
 test('README documents macOS pf firewall fallback', () => {
   const readme = readProjectFile('README.md');
 

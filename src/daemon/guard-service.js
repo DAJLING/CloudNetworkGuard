@@ -28,6 +28,16 @@ function defaultEnvironmentConsistencyState() {
   };
 }
 
+function defaultMonitoringState() {
+  return {
+    enabled: false,
+    intervalMinutes: 15,
+    lastRunAt: null,
+    lastResult: null,
+    lastError: null
+  };
+}
+
 function shouldUseSystemProxy() {
   if (process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY === '1') return false;
   if (process.env.NETWORK_GUARD_USE_SYSTEM_PROXY === '1') return true;
@@ -61,6 +71,8 @@ class GuardService {
     this.environmentConsistency = new EnvironmentConsistencyService({
       dataDir: path.dirname(store.filePath)
     });
+    this.monitoringTimer = null;
+    this.monitoringRunning = false;
   }
 
   getEnvironmentConsistencyStatus() {
@@ -79,6 +91,108 @@ class GuardService {
     };
   }
 
+  getMonitoringStatus() {
+    return {
+      ...defaultMonitoringState(),
+      ...(this.store.getState().monitoring || {}),
+      running: this.monitoringRunning === true
+    };
+  }
+
+  normalizeMonitoringConfig(config = {}) {
+    const rawInterval = config.intervalMinutes === undefined ? 15 : Number(config.intervalMinutes);
+    if (!Number.isFinite(rawInterval) || rawInterval < 1 || rawInterval > 1440) {
+      throw new Error('MONITORING_INTERVAL_INVALID');
+    }
+    return {
+      enabled: config.enabled === true,
+      intervalMinutes: Math.round(rawInterval)
+    };
+  }
+
+  setMonitoringConfig(config = {}) {
+    const current = this.getMonitoringStatus();
+    const normalized = this.normalizeMonitoringConfig(config);
+    this.store.update({
+      monitoring: {
+        ...current,
+        ...normalized,
+        running: undefined,
+        lastError: null
+      }
+    });
+    this.rescheduleMonitoring();
+    const status = this.getStatus();
+    this.emit({ type: 'monitoring-config', status });
+    return status;
+  }
+
+  clearMonitoringTimer() {
+    if (!this.monitoringTimer) return;
+    clearInterval(this.monitoringTimer);
+    this.monitoringTimer = null;
+  }
+
+  rescheduleMonitoring() {
+    this.clearMonitoringTimer();
+    const monitoring = this.getMonitoringStatus();
+    if (!monitoring.enabled) return;
+    this.monitoringTimer = setInterval(
+      () => {
+        this.runMonitoringTick().catch(() => {});
+      },
+      monitoring.intervalMinutes * 60 * 1000
+    );
+    if (typeof this.monitoringTimer.unref === 'function') this.monitoringTimer.unref();
+  }
+
+  async runMonitoringTick() {
+    if (this.monitoringRunning) {
+      this.store.update({
+        monitoring: {
+          ...this.getMonitoringStatus(),
+          running: undefined,
+          lastError: 'MONITORING_ALREADY_RUNNING'
+        }
+      });
+      this.emit({ type: 'monitoring-skipped', status: this.getStatus() });
+      return null;
+    }
+
+    this.monitoringRunning = true;
+    const ranAt = new Date().toISOString();
+    try {
+      const check = await this.checkNow();
+      this.store.update({
+        monitoring: {
+          ...this.getMonitoringStatus(),
+          running: undefined,
+          lastRunAt: ranAt,
+          lastResult: {
+            verdict: check.verdict || 'UNKNOWN',
+            reasons: Array.isArray(check.reasons) ? check.reasons : [],
+            checkedAt: check.checkedAt || ranAt
+          },
+          lastError: null
+        }
+      });
+      return check;
+    } catch (error) {
+      this.store.update({
+        monitoring: {
+          ...this.getMonitoringStatus(),
+          running: undefined,
+          lastRunAt: ranAt,
+          lastError: error.message || 'MONITORING_FAILED'
+        }
+      });
+      return null;
+    } finally {
+      this.monitoringRunning = false;
+      this.emit({ type: 'monitoring-tick', status: this.getStatus() });
+    }
+  }
+
   async start() {
     if (!shouldUseSystemProxy()) {
       await this.proxyManager.disable().catch(() => {});
@@ -93,10 +207,12 @@ class GuardService {
         resolve();
       });
     });
+    this.rescheduleMonitoring();
     return this.getStatus();
   }
 
   async stop() {
+    this.clearMonitoringTimer();
     await this.proxy.stop();
     await new Promise((resolve) => this.apiServer.close(() => resolve()));
   }
@@ -127,6 +243,7 @@ class GuardService {
       },
       clientEnvironment: state.clientEnvironment,
       environmentConsistency: this.getEnvironmentConsistencyStatus(),
+      monitoring: this.getMonitoringStatus(),
       actionRequired: state.actionRequired || null,
       guidance: getTopReasonGuidance(reasons),
       targetConfig: this.targetConfig,

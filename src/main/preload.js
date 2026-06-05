@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('networkGuard', {
   restoreEnvironmentConsistency: () => ipcRenderer.invoke('guard:environment-consistency-restore'),
   setEnvironmentConsistencyConfig: (config) => ipcRenderer.invoke('guard:environment-consistency-set-config', config),
   backupEnvironmentNow: () => ipcRenderer.invoke('guard:environment-consistency-backup-now'),
+  setMonitoringConfig: (config) => ipcRenderer.invoke('guard:set-monitoring-config', config),
   setLaunchAtLogin: (enabled) => ipcRenderer.invoke('guard:set-launch-at-login', enabled),
   onEvent: (callback) => {
     const listener = (_event, payload) => callback(payload);

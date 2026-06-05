@@ -765,6 +765,17 @@ code {
   justify-content: flex-end;
 }
 
+.monitoring-panel {
+  margin-bottom: 14px;
+}
+
+.monitoring-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(160px, 220px);
+  gap: 12px;
+  align-items: end;
+}
+
 .target-row > span:last-child {
   color: var(--muted);
   font-size: 13px;
@@ -974,6 +985,8 @@ code {
   .config-lines div,
   .check-row,
   .target-row,
+  .target-row.editable,
+  .monitoring-controls,
   .log-row {
     grid-template-columns: 1fr;
   }

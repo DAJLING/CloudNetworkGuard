@@ -60,6 +60,13 @@ class Store {
       recovery: {
         lastResult: null
       },
+      monitoring: {
+        enabled: false,
+        intervalMinutes: 15,
+        lastRunAt: null,
+        lastResult: null,
+        lastError: null
+      },
       setup: {
         completed: false,
         completedAt: null,

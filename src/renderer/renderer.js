@@ -56,6 +56,10 @@ const els = {
   resetTargetConfigDefaults: document.querySelector('#resetTargetConfigDefaults'),
   checkItems: document.querySelector('#checkItems'),
   logs: document.querySelector('#logs'),
+  monitoringEnabled: document.querySelector('#monitoringEnabled'),
+  monitoringInterval: document.querySelector('#monitoringInterval'),
+  saveMonitoring: document.querySelector('#saveMonitoring'),
+  monitoringStatus: document.querySelector('#monitoringStatus'),
   staticIpDialog: document.querySelector('#staticIpDialog'),
   staticIpDialogInput: document.querySelector('#staticIpDialogInput'),
   staticIpDialogError: document.querySelector('#staticIpDialogError'),
@@ -255,6 +259,9 @@ function setBusy(isBusy) {
     els.copyReport,
     els.confirmStaticIp,
     els.skipStaticIp,
+    els.addTargetRule,
+    els.saveTargetRules,
+    els.saveMonitoring,
     els.applyEnvironmentConsistency,
     els.restoreEnvironmentConsistency,
     els.backupEnvironmentNow,
@@ -503,6 +510,32 @@ function renderLogs(logs = []) {
     .join('');
 }
 
+function renderMonitoring(monitoring = {}) {
+  if (!els.monitoringStatus) return;
+  const enabled = monitoring.enabled === true;
+  if (els.monitoringEnabled) els.monitoringEnabled.checked = enabled;
+  if (els.monitoringInterval) els.monitoringInterval.value = String(monitoring.intervalMinutes || 15);
+
+  const parts = [enabled ? `已启用，每 ${monitoring.intervalMinutes || 15} 分钟检测` : '尚未启用周期监控'];
+  if (monitoring.running) parts.push('正在检测');
+  if (monitoring.lastRunAt) parts.push(`上次运行 ${formatDate(monitoring.lastRunAt)}`);
+  if (monitoring.lastResult && monitoring.lastResult.verdict) parts.push(`结果 ${labelVerdict(monitoring.lastResult.verdict)}`);
+  if (monitoring.lastError) parts.push(`错误 ${monitoring.lastError}`);
+  els.monitoringStatus.textContent = parts.join(' · ');
+  els.monitoringStatus.className = monitoring.lastError ? 'field-message error' : enabled ? 'field-message success' : 'field-message';
+}
+
+function readMonitoringConfig() {
+  const interval = Number(els.monitoringInterval && els.monitoringInterval.value);
+  if (!Number.isFinite(interval) || interval < 1 || interval > 1440) {
+    throw new Error('监控间隔需在 1 到 1440 分钟之间。');
+  }
+  return {
+    enabled: Boolean(els.monitoringEnabled && els.monitoringEnabled.checked),
+    intervalMinutes: Math.round(interval)
+  };
+}
+
 function renderRecovery(recovery = {}) {
   if (!els.recoveryStatus) return;
   const result = recovery.lastResult;
@@ -741,6 +774,7 @@ function render(status) {
   renderGuidance(status.guidance || {});
   renderBinding(status.binding || {});
   renderEnvironmentConsistency(status.environmentConsistency || {});
+  renderMonitoring(status.monitoring || {});
   renderSetup(status.setup || {});
 }
 
@@ -988,6 +1022,25 @@ if (els.saveTargetRules) {
         els.targetRulesStatus.className = 'field-message error';
       }
       setHelp(error.message || '规则保存失败。', 'error');
+    } finally {
+      setBusy(false);
+    }
+  });
+}
+
+if (els.saveMonitoring) {
+  els.saveMonitoring.addEventListener('click', async () => {
+    setBusy(true);
+    try {
+      const config = readMonitoringConfig();
+      render(await window.networkGuard.setMonitoringConfig(config));
+      setHelp('周期监控设置已保存。', 'success');
+    } catch (error) {
+      if (els.monitoringStatus) {
+        els.monitoringStatus.textContent = error.message || '监控设置保存失败。';
+        els.monitoringStatus.className = 'field-message error';
+      }
+      setHelp(error.message || '监控设置保存失败。', 'error');
     } finally {
       setBusy(false);
     }

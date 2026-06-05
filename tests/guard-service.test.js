@@ -489,3 +489,34 @@ test('GuardService applyEnvironmentConsistency sets pendingPostApplyCheck', asyn
   assert.equal(service.store.getState().environmentConsistency.enabled, true);
   assert.equal(result.status.environmentConsistency.lastTargetProfile.timeZone, 'America/Chicago');
 });
+
+test('GuardService setMonitoringConfig persists enabled interval', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
+  const store = new Store(path.join(tmp, 'state.json'));
+  const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
+
+  const status = service.setMonitoringConfig({ enabled: true, intervalMinutes: 5 });
+
+  assert.equal(status.monitoring.enabled, true);
+  assert.equal(status.monitoring.intervalMinutes, 5);
+});
+
+test('GuardService runMonitoringTick records compact result and skips overlap', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
+  const store = new Store(path.join(tmp, 'state.json'));
+  const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
+  let calls = 0;
+  service.checkNow = async () => {
+    calls += 1;
+    return { verdict: 'PASS', reasons: [], checkedAt: '2026-06-05T00:00:00.000Z' };
+  };
+
+  await service.runMonitoringTick();
+  service.monitoringRunning = true;
+  await service.runMonitoringTick();
+
+  const monitoring = store.getState().monitoring;
+  assert.equal(calls, 1);
+  assert.equal(monitoring.lastResult.verdict, 'PASS');
+  assert.equal(monitoring.lastError, 'MONITORING_ALREADY_RUNNING');
+});

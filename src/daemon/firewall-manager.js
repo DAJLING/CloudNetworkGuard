@@ -4,6 +4,7 @@ const net = require('net');
 const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
+const { MacCommandRunner } = require('./macos-command-runner');
 
 const FIREWALL_RULE_PREFIX = 'ClaudeCodexNetworkGuard';
 const FIREWALL_TARGET_HOSTS = [
@@ -67,12 +68,15 @@ function removePfAnchorBlock(content = '') {
   return String(content || '').replace(pattern, '');
 }
 
-function ensurePfAnchorBlock(content = '') {
+function ensurePfAnchorBlock(
+  content = '',
+  { anchorName = PF_ANCHOR_NAME, anchorPath = PF_ANCHOR_PATH } = {}
+) {
   const cleaned = removePfAnchorBlock(content);
   const block = [
     PF_CONF_BLOCK_START,
-    `anchor "${PF_ANCHOR_NAME}"`,
-    `load anchor "${PF_ANCHOR_NAME}" from "${PF_ANCHOR_PATH}"`,
+    `anchor "${anchorName}"`,
+    `load anchor "${anchorName}" from "${anchorPath}"`,
     PF_CONF_BLOCK_END
   ].join('\n');
   return `${cleaned.replace(/\s+$/g, '')}${cleaned.trim() ? '\n' : ''}${block}\n`;
@@ -115,8 +119,22 @@ async function resolveTargetIps(hosts = FIREWALL_TARGET_HOSTS) {
 }
 
 class FirewallManager {
-  constructor({ hosts = FIREWALL_TARGET_HOSTS } = {}) {
+  constructor({
+    hosts = FIREWALL_TARGET_HOSTS,
+    platform = process.platform,
+    fsImpl = fs,
+    macRunner = new MacCommandRunner(),
+    resolveTargetIpsImpl = resolveTargetIps,
+    pfConfPath = PF_CONF_PATH,
+    pfAnchorPath = PF_ANCHOR_PATH
+  } = {}) {
     this.hosts = hosts;
+    this.platform = platform;
+    this.fs = fsImpl;
+    this.macRunner = macRunner;
+    this.resolveTargetIps = resolveTargetIpsImpl;
+    this.pfConfPath = pfConfPath;
+    this.pfAnchorPath = pfAnchorPath;
   }
 
   setHosts(hosts = []) {
@@ -128,17 +146,10 @@ class FirewallManager {
       return { applied: false, mode: 'SKIPPED', rules: [], lastError: null };
     }
 
-    if (process.platform === 'win32') return this.applyWindowsBlock();
-    if (process.platform === 'darwin') {
-      return {
-        applied: false,
-        mode: 'UNSUPPORTED_PLATFORM',
-        rules: [],
-        lastError: 'macOS firewall packet blocking requires a privileged network extension or pf helper.'
-      };
-    }
+    if (this.platform === 'win32') return this.applyWindowsBlock();
+    if (this.platform === 'darwin') return this.applyMacBlock();
 
-    return { applied: false, mode: 'UNSUPPORTED_PLATFORM', rules: [], lastError: process.platform };
+    return { applied: false, mode: 'UNSUPPORTED_PLATFORM', rules: [], lastError: this.platform };
   }
 
   async clearBlock(existingRules = []) {
@@ -146,7 +157,8 @@ class FirewallManager {
       return { applied: false, mode: 'SKIPPED', rules: [], lastError: null };
     }
 
-    if (process.platform === 'win32') return this.clearWindowsBlock(existingRules);
+    if (this.platform === 'win32') return this.clearWindowsBlock(existingRules);
+    if (this.platform === 'darwin') return this.clearMacBlock();
     return { applied: false, mode: 'UNSUPPORTED_PLATFORM', rules: [], lastError: null };
   }
 
@@ -160,7 +172,7 @@ class FirewallManager {
       };
     }
 
-    const resolved = await resolveTargetIps(this.hosts);
+    const resolved = await this.resolveTargetIps(this.hosts);
     const rules = [];
     const errors = [];
 
@@ -221,7 +233,7 @@ class FirewallManager {
 
     const rules = existingRules.length
       ? existingRules
-      : (await resolveTargetIps(this.hosts)).ips.map((ip) => ({
+      : (await this.resolveTargetIps(this.hosts)).ips.map((ip) => ({
           name: `${FIREWALL_RULE_PREFIX}_${sanitizeRuleName(ip)}`,
           remoteIp: ip
         }));
@@ -255,8 +267,85 @@ class FirewallManager {
     };
   }
 
+  readPfConf() {
+    if (!this.fs.existsSync(this.pfConfPath)) return '';
+    return this.fs.readFileSync(this.pfConfPath, 'utf8');
+  }
+
+  async applyMacBlock() {
+    let resolved = { ips: [], results: [] };
+    try {
+      resolved = await this.resolveTargetIps(this.hosts);
+      const ips = Array.isArray(resolved.ips) ? resolved.ips : [];
+      if (!ips.length) {
+        return {
+          applied: false,
+          mode: 'PARTIAL_BLOCK',
+          rules: [],
+          resolved,
+          lastError: 'PF_IPS_EMPTY'
+        };
+      }
+
+      const ruleText = `${renderPfBlockRule(ips)}\n`;
+      const patchedPfConf = ensurePfAnchorBlock(this.readPfConf(), {
+        anchorName: PF_ANCHOR_NAME,
+        anchorPath: this.pfAnchorPath
+      });
+
+      await this.macRunner.writeFilePrivileged(this.pfAnchorPath, ruleText);
+      await this.macRunner.writeFilePrivileged(this.pfConfPath, patchedPfConf);
+      await this.macRunner.runPrivilegedCommands([
+        ['pfctl', '-nf', this.pfConfPath],
+        ['pfctl', '-f', this.pfConfPath],
+        ['pfctl', '-e']
+      ]);
+
+      return {
+        applied: true,
+        mode: 'PF_BLOCK',
+        rules: [{ anchor: PF_ANCHOR_NAME, ips }],
+        resolved,
+        lastError: null
+      };
+    } catch (error) {
+      return {
+        applied: false,
+        mode: 'PARTIAL_BLOCK',
+        rules: [],
+        resolved,
+        lastError: error.message || 'PF_BLOCK_FAILED'
+      };
+    }
+  }
+
+  async clearMacBlock() {
+    try {
+      const patchedPfConf = removePfAnchorBlock(this.readPfConf());
+      await this.macRunner.writeFilePrivileged(this.pfConfPath, patchedPfConf);
+      await this.macRunner.removeFilePrivileged(this.pfAnchorPath);
+      await this.macRunner.runPrivilegedCommands([
+        ['pfctl', '-nf', this.pfConfPath],
+        ['pfctl', '-f', this.pfConfPath]
+      ]);
+      return {
+        applied: true,
+        mode: 'PF_CLEARED',
+        rules: [],
+        lastError: null
+      };
+    } catch (error) {
+      return {
+        applied: false,
+        mode: 'PARTIAL_CLEAR',
+        rules: [],
+        lastError: error.message || 'PF_CLEAR_FAILED'
+      };
+    }
+  }
+
   getHostsPath() {
-    if (process.platform === 'win32') {
+    if (this.platform === 'win32') {
       return path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'drivers', 'etc', 'hosts');
     }
     return '/etc/hosts';
@@ -279,18 +368,18 @@ class FirewallManager {
 
   async applyHostsBlock() {
     const hostsPath = this.getHostsPath();
-    const current = fs.existsSync(hostsPath) ? fs.readFileSync(hostsPath, 'utf8') : '';
+    const current = this.fs.existsSync(hostsPath) ? this.fs.readFileSync(hostsPath, 'utf8') : '';
     const cleaned = this.removeHostsBlock(current);
     const next = `${cleaned}${cleaned ? os.EOL : ''}${this.renderHostsBlock()}${os.EOL}`;
-    fs.writeFileSync(hostsPath, next);
+    this.fs.writeFileSync(hostsPath, next);
     return { applied: true, hostsPath, hosts: this.hosts };
   }
 
   async clearHostsBlock() {
     const hostsPath = this.getHostsPath();
-    if (!fs.existsSync(hostsPath)) return { applied: false, hostsPath };
-    const current = fs.readFileSync(hostsPath, 'utf8');
-    fs.writeFileSync(hostsPath, `${this.removeHostsBlock(current)}${os.EOL}`);
+    if (!this.fs.existsSync(hostsPath)) return { applied: false, hostsPath };
+    const current = this.fs.readFileSync(hostsPath, 'utf8');
+    this.fs.writeFileSync(hostsPath, `${this.removeHostsBlock(current)}${os.EOL}`);
     return { applied: true, hostsPath };
   }
 }

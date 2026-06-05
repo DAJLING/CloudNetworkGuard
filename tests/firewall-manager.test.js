@@ -2,6 +2,20 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { FIREWALL_RULE_PREFIX, FIREWALL_TARGET_HOSTS, HOSTS_BLOCK_START, HOSTS_BLOCK_END, FirewallManager } = require('../src/daemon/firewall-manager');
 
+async function withFirewallEnabled(fn) {
+  const previous = process.env.NETWORK_GUARD_SKIP_FIREWALL;
+  delete process.env.NETWORK_GUARD_SKIP_FIREWALL;
+  try {
+    return await fn();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.NETWORK_GUARD_SKIP_FIREWALL;
+    } else {
+      process.env.NETWORK_GUARD_SKIP_FIREWALL = previous;
+    }
+  }
+}
+
 test('firewall rule prefix is scoped to this app', () => {
   assert.equal(FIREWALL_RULE_PREFIX, 'ClaudeCodexNetworkGuard');
 });
@@ -91,4 +105,139 @@ test('removePfAnchorBlock removes marked CRLF anchor block', () => {
   ].join('\r\n');
 
   assert.equal(removePfAnchorBlock(`${content}\r\n`), 'set skip on lo0\r\npass out all\r\n');
+});
+
+test('applyMacBlock writes anchor, patches pf.conf, and loads pf', async () => {
+  await withFirewallEnabled(async () => {
+    const { FirewallManager: TestFirewallManager } = require('../src/daemon/firewall-manager');
+    const pfConfPath = '/tmp/network-guard-pf.conf';
+    const pfAnchorPath = '/tmp/network-guard-anchor';
+    const files = {
+      [pfConfPath]: 'set skip on lo0\n'
+    };
+    const privilegedWrites = [];
+    const privilegedCommands = [];
+    const manager = new TestFirewallManager({
+      hosts: ['api.openai.com'],
+      platform: 'darwin',
+      pfConfPath,
+      pfAnchorPath,
+      fsImpl: {
+        existsSync: (filePath) => Object.prototype.hasOwnProperty.call(files, filePath),
+        readFileSync: (filePath) => files[filePath],
+        writeFileSync: (filePath, content) => {
+          files[filePath] = content;
+        }
+      },
+      resolveTargetIpsImpl: async () => ({
+        ips: ['203.0.113.10'],
+        results: [{ host: 'api.openai.com', ips: ['203.0.113.10'], errors: [] }]
+      }),
+      macRunner: {
+        writeFilePrivileged: async (filePath, content) => {
+          privilegedWrites.push({ filePath, content });
+          files[filePath] = content;
+        },
+        removeFilePrivileged: async (filePath) => {
+          delete files[filePath];
+        },
+        runPrivilegedCommands: async (commands) => {
+          privilegedCommands.push(commands);
+          return '';
+        }
+      }
+    });
+
+    const result = await manager.applyBlock();
+
+    assert.equal(result.mode, 'PF_BLOCK');
+    assert.equal(result.applied, true);
+    assert.equal(privilegedWrites[0].filePath, pfAnchorPath);
+    assert.match(privilegedWrites[0].content, /block drop out quick to \{ 203\.0\.113\.10 \}/);
+    assert.equal(privilegedWrites[1].filePath, pfConfPath);
+    assert.match(privilegedWrites[1].content, new RegExp(`load anchor "com\\.local\\.claude-codex-network-guard" from "${pfAnchorPath}"`));
+    assert.deepEqual(privilegedCommands[0], [
+      ['pfctl', '-nf', pfConfPath],
+      ['pfctl', '-f', pfConfPath],
+      ['pfctl', '-e']
+    ]);
+  });
+});
+
+test('clearMacBlock removes anchor block and reloads pf.conf', async () => {
+  await withFirewallEnabled(async () => {
+    const {
+      FirewallManager: TestFirewallManager,
+      PF_ANCHOR_PATH
+    } = require('../src/daemon/firewall-manager');
+    const files = {
+      '/etc/pf.conf': [
+        'set skip on lo0',
+        '# ClaudeCodexNetworkGuard PF START',
+        'anchor "com.local.claude-codex-network-guard"',
+        'load anchor "com.local.claude-codex-network-guard" from "/etc/pf.anchors/com.local.claude-codex-network-guard"',
+        '# ClaudeCodexNetworkGuard PF END',
+        ''
+      ].join('\n'),
+      [PF_ANCHOR_PATH]: 'block drop out quick to { 203.0.113.10 }\n'
+    };
+    const commands = [];
+    const manager = new TestFirewallManager({
+      platform: 'darwin',
+      fsImpl: {
+        existsSync: (filePath) => Object.prototype.hasOwnProperty.call(files, filePath),
+        readFileSync: (filePath) => files[filePath],
+        writeFileSync: (filePath, content) => {
+          files[filePath] = content;
+        }
+      },
+      macRunner: {
+        writeFilePrivileged: async (filePath, content) => {
+          files[filePath] = content;
+        },
+        removeFilePrivileged: async (filePath) => {
+          delete files[filePath];
+        },
+        runPrivilegedCommands: async (nextCommands) => {
+          commands.push(nextCommands);
+          return '';
+        }
+      }
+    });
+
+    const result = await manager.clearBlock();
+
+    assert.equal(result.mode, 'PF_CLEARED');
+    assert.equal(result.rules.length, 0);
+    assert.doesNotMatch(files['/etc/pf.conf'], /ClaudeCodexNetworkGuard PF START/);
+    assert.equal(files[PF_ANCHOR_PATH], undefined);
+    assert.deepEqual(commands[0], [
+      ['pfctl', '-nf', '/etc/pf.conf'],
+      ['pfctl', '-f', '/etc/pf.conf']
+    ]);
+  });
+});
+
+test('applyMacBlock returns partial result when authorization fails', async () => {
+  await withFirewallEnabled(async () => {
+    const { FirewallManager: TestFirewallManager } = require('../src/daemon/firewall-manager');
+    const manager = new TestFirewallManager({
+      hosts: ['api.openai.com'],
+      platform: 'darwin',
+      resolveTargetIpsImpl: async () => ({ ips: ['203.0.113.10'], results: [] }),
+      macRunner: {
+        writeFilePrivileged: async () => {
+          throw new Error('AUTH_DENIED');
+        },
+        removeFilePrivileged: async () => {},
+        runPrivilegedCommands: async () => ''
+      }
+    });
+
+    const result = await manager.applyBlock();
+
+    assert.equal(result.mode, 'PARTIAL_BLOCK');
+    assert.equal(result.applied, false);
+    assert.match(result.lastError, /AUTH_DENIED/);
+  });
 });

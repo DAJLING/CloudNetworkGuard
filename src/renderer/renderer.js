@@ -520,7 +520,7 @@ function renderEnvironmentConsistency(consistency = {}) {
   const profile = consistency.lastTargetProfile;
 
   if (!supported) {
-    els.environmentConsistencySummary.textContent = '当前平台暂不支持自动对齐（仅 Windows）。';
+    els.environmentConsistencySummary.textContent = '当前平台暂不支持自动对齐。';
     els.environmentConsistencyToggle.disabled = true;
     els.applyEnvironmentConsistency.disabled = true;
     return;
@@ -569,7 +569,7 @@ function renderEnvironmentConsistency(consistency = {}) {
   if (applyResult) {
     if (applyResult.ok) {
       els.environmentConsistencyStatus.textContent =
-        '环境对齐完成。若重启后检测仍失败，请注销 Windows 并确认 Chrome/Edge 已关闭后再试。';
+        '环境对齐完成。若重启后检测仍失败，请重新登录当前系统账户，并确认 Chrome/Edge 已关闭后再试。';
       els.environmentConsistencyStatus.className = 'field-message success';
     } else {
       const failed = formatConsistencySteps(applyResult.steps);
@@ -820,7 +820,7 @@ els.applyEnvironmentConsistency.addEventListener('click', async () => {
     if (result.status) render(result.status);
     if (result.ok && result.restartRequired) {
       els.environmentConsistencyStatus.textContent =
-        '对齐完成，应用约 2 秒后自动重启并重新检测。若仍失败，请注销 Windows 一次。';
+        '对齐完成，应用约 2 秒后自动重启并重新检测。若仍失败，请重新登录当前系统账户后再检测。';
       els.environmentConsistencyStatus.className = 'field-message success';
       return;
     }

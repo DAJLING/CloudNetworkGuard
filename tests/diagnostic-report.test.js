@@ -56,3 +56,24 @@ test('buildDiagnosticReport includes environmentConsistency summary', () => {
   assert.equal(report.environmentConsistency.backup.createdAt, '2026-05-30T01:00:00.000Z');
   assert.equal(report.environmentConsistency.lastTargetProfile.timeZone, 'America/Chicago');
 });
+
+test('buildDiagnosticReport includes environment consistency supported flag', () => {
+  const report = buildDiagnosticReport({
+    environmentConsistency: {
+      supported: true,
+      enabled: true,
+      deriveFromExitIp: true,
+      backup: { hasBackup: true, createdAt: '2026-05-31T01:00:00.000Z' },
+      lastTargetProfile: { timeZone: 'America/Chicago', language: 'en-US' },
+      lastApplyResult: { ok: true, at: '2026-05-31T01:01:00.000Z', steps: { secret: { ok: true } } }
+    }
+  });
+
+  assert.equal(report.environmentConsistency.supported, true);
+  assert.equal(report.environmentConsistency.backup.createdAt, '2026-05-31T01:00:00.000Z');
+  assert.deepEqual(report.environmentConsistency.lastApplyResult, {
+    ok: true,
+    at: '2026-05-31T01:01:00.000Z'
+  });
+  assert.equal(JSON.stringify(report).includes('secret'), false);
+});

@@ -57,7 +57,7 @@ npm.cmd run dist:msi
 
 - Guard disabled: target traffic is allowed and no block notification is shown.
 - Guard enabled: the app temporarily blocks target traffic while checking, then releases firewall/hosts blocks only if validation passes.
-- Direct clients: when the verdict blocks traffic, Windows firewall rules are added for resolved target IPs so CLI tools that bypass the system proxy are also blocked.
+- Direct clients: when the verdict blocks traffic, Windows firewall rules or macOS `pf` anchor rules are added for resolved target IPs so CLI tools that bypass the system proxy are also blocked.
 - First run: the app requires a static residential IP value before enabling the guard unless the user explicitly saves `0.0.0.0` to skip that specific check.
 - Exit IP binding: the first detected exit IP is locally bound by hash; later changes are blocked until state is reset.
 - Claude control check: DNS, TCP, TLS, and Claude web probe failures block guarded traffic.
@@ -69,6 +69,7 @@ npm.cmd run dist:msi
 - Windows proxy settings are applied through the current user's Internet Settings registry keys.
 - Windows firewall fallback uses `netsh advfirewall` outbound block rules for resolved Claude/OpenAI/ChatGPT IPs. It may require elevated permissions.
 - macOS proxy settings use `networksetup` and default to the `Wi-Fi` service. Set `NETWORK_GUARD_MAC_SERVICE` to target another network service.
+- macOS firewall fallback uses an app-owned `pf` anchor at `/etc/pf.anchors/com.local.claude-codex-network-guard` and may request administrator authorization. The app only manages its marked `pf.conf` block and its own anchor file.
 - Set `NETWORK_GUARD_SKIP_SYSTEM_PROXY=1` for tests or dry runs that should not touch system proxy settings.
 - Set `NETWORK_GUARD_SKIP_FIREWALL=1` for tests or dry runs that should not touch firewall settings.
 

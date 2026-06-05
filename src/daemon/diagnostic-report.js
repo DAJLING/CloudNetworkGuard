@@ -14,6 +14,7 @@ function sanitizeProvider(provider = {}) {
 function summarizeEnvironmentConsistency(environmentConsistency = {}) {
   const backup = environmentConsistency.backup || {};
   return {
+    supported: environmentConsistency.supported === true,
     enabled: Boolean(environmentConsistency.enabled),
     deriveFromExitIp: environmentConsistency.deriveFromExitIp !== false,
     lastTargetProfile: environmentConsistency.lastTargetProfile || null,

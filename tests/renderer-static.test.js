@@ -84,6 +84,8 @@ test('renderer exposes environment consistency controls', () => {
   assert.match(preload, /applyEnvironmentConsistency: \(\) => ipcRenderer\.invoke\('guard:environment-consistency-apply'\)/);
   assert.match(main, /ipcMain\.handle\('guard:environment-consistency-apply'/);
   assert.doesNotMatch(main, /appendSwitch\('lang'/);
+  assert.doesNotMatch(renderer, /注销 Windows/);
+  assert.doesNotMatch(renderer, /仅 Windows/);
 });
 
 test('renderer exposes configurable validation target controls', () => {
@@ -117,4 +119,12 @@ test('renderer exposes diagnostic report controls', () => {
   assert.match(preload, /getDiagnosticReport: \(\) => ipcRenderer\.invoke\('guard:get-diagnostic-report'\)/);
   assert.match(main, /ipcMain\.handle\('guard:get-diagnostic-report'/);
   assert.match(service, /buildDiagnosticReport/);
+});
+
+test('README documents macOS pf firewall fallback', () => {
+  const readme = readProjectFile('README.md');
+
+  assert.match(readme, /macOS firewall fallback/);
+  assert.match(readme, /\/etc\/pf\.anchors\/com\.local\.claude-codex-network-guard/);
+  assert.match(readme, /administrator authorization/);
 });

@@ -428,6 +428,25 @@ test('GuardService decorateCheckWithFirewall skips failure when guard is disable
   assert.equal(firewallItem.reason, null);
 });
 
+test('GuardService decorateCheckWithFirewall treats macOS pf modes as successful firewall states', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
+  const store = new Store(path.join(tmp, 'state.json'));
+  const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
+  store.update({ guardState: GuardState.ENABLED });
+
+  const blocked = service.decorateCheckWithFirewall(
+    { verdict: 'BLOCK', reasons: ['DNS_CHECK_FAILED'], checkItems: [] },
+    { mode: 'PF_BLOCK', rules: [{ anchor: 'com.local.claude-codex-network-guard' }], lastError: null }
+  );
+  const cleared = service.decorateCheckWithFirewall(
+    { verdict: 'PASS', reasons: [], checkItems: [] },
+    { mode: 'PF_CLEARED', rules: [], lastError: null }
+  );
+
+  assert.equal(blocked.checkItems.find((item) => item.id === 'firewall').verdict, 'PASS');
+  assert.equal(cleared.checkItems.find((item) => item.id === 'firewall').verdict, 'PASS');
+});
+
 test('GuardService applyEnvironmentConsistency sets pendingPostApplyCheck', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
   const store = new Store(path.join(tmp, 'state.json'));

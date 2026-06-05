@@ -1,12 +1,12 @@
 const http = require('http');
 const path = require('path');
 const { Store } = require('./store');
-const { NetworkChecker } = require('./network-checker');
+const { NetworkChecker, enabledChecksFromConfig } = require('./network-checker');
 const { ProxyManager } = require('./proxy-manager');
 const { GuardProxy } = require('./guard-proxy');
 const { recordTargetUsage } = require('./usage-monitor');
 const { FirewallManager } = require('./firewall-manager');
-const { TARGET_CONFIG_FILE, TargetConfigManager } = require('./target-config');
+const { TARGET_CONFIG_FILE, TargetConfigManager, hasEnabledValidationChecks } = require('./target-config');
 const { scoreProviderResults } = require('./scoring');
 const { hashIp, maskIp } = require('./static-ip-observer');
 const { buildDiagnosticReport } = require('./diagnostic-report');
@@ -314,6 +314,7 @@ class GuardService {
   recordTargetRequest(host) {
     const state = this.store.getState();
     if (state.guardState !== GuardState.ENABLED) return { block: false, reasons: [] };
+    if (!enabledChecksFromConfig(this.targetConfig).usageRate) return { block: false, reasons: [] };
 
     const usage = recordTargetUsage({ state, host });
     const currentCheck = state.lastCheck || {
@@ -498,6 +499,24 @@ class GuardService {
   }
 
   async enableGuard(mode = GuardMode.AUTO) {
+    if (!hasEnabledValidationChecks(this.targetConfig.validation)) {
+      const check = {
+        checkedAt: new Date().toISOString(),
+        verdict: NetworkVerdict.BLOCK,
+        reasons: ['VALIDATION_CHECK_REQUIRED'],
+        allowTargetTraffic: false,
+        checkItems: []
+      };
+      this.store.update({
+        guardState: GuardState.DISABLED,
+        actionRequired: { type: 'VALIDATION_CHECK_REQUIRED' },
+        lastCheck: check
+      });
+      const status = this.getStatus();
+      this.emit({ type: 'validation-check-required', status });
+      return status;
+    }
+
     const staticPreflight = await this.checker.checkStaticResidentialIpPreflight();
     if (!staticPreflight.ok) {
       const preflightCheck = {

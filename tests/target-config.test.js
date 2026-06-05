@@ -5,7 +5,9 @@ const os = require('os');
 const path = require('path');
 const {
   TargetConfigManager,
+  DEFAULT_VALIDATION_CHECKS,
   deriveHostsFromRules,
+  hasEnabledValidationChecks,
   normalizeStaticResidentialIp,
   normalizeTargetConfig,
   resolveValidationHosts,
@@ -23,6 +25,7 @@ test('TargetConfigManager writes a default editable config file', () => {
   assert.equal(config.rules.some((rule) => rule.domainPattern === 'api.openai.com'), true);
   assert.equal(config.firewallHosts.includes('claude.ai'), true);
   assert.equal(config.staticResidentialIp, '');
+  assert.deepEqual(config.validation.checks, DEFAULT_VALIDATION_CHECKS);
 });
 
 test('normalizeTargetConfig supports user-added and removed target rules', () => {
@@ -85,13 +88,46 @@ test('resolveValidationHosts supports Claude-only validation', () => {
 test('resolveValidationHosts supports Codex-only validation without web probe', () => {
   const resolved = resolveValidationHosts({
     services: { claude: false, codex: true },
-    webProbe: { enabled: true, url: 'https://claude.ai/' },
+    webProbe: { enabled: false, url: 'https://claude.ai/' },
     useCustomHosts: false
   });
 
   assert.deepEqual(resolved.healthCheckHosts, ['api.openai.com', 'chat.openai.com', 'auth.openai.com']);
   assert.deepEqual(resolved.controlHosts, ['api.openai.com']);
   assert.equal(resolved.webProbeUrl, null);
+});
+
+test('resolveValidationHosts allows non-target checks without selected services', () => {
+  const resolved = resolveValidationHosts({
+    services: { claude: false, codex: false },
+    checks: {
+      ...DEFAULT_VALIDATION_CHECKS,
+      dns: false,
+      tcp: false,
+      tls: false,
+      controlHosts: false
+    },
+    webProbe: { enabled: false, url: '' },
+    useCustomHosts: false
+  });
+
+  assert.deepEqual(resolved.healthCheckHosts, []);
+  assert.deepEqual(resolved.controlHosts, []);
+  assert.equal(hasEnabledValidationChecks(resolved.validation), true);
+});
+
+test('resolveValidationHosts supports saving all validation checks disabled', () => {
+  const resolved = resolveValidationHosts({
+    services: { claude: false, codex: false },
+    checks: Object.fromEntries(Object.keys(DEFAULT_VALIDATION_CHECKS).map((key) => [key, false])),
+    webProbe: { enabled: false, url: '' },
+    useCustomHosts: false
+  });
+
+  assert.deepEqual(resolved.healthCheckHosts, []);
+  assert.deepEqual(resolved.controlHosts, []);
+  assert.equal(resolved.webProbeUrl, null);
+  assert.equal(hasEnabledValidationChecks(resolved.validation), false);
 });
 
 test('TargetConfigManager saves and resets validation config', () => {

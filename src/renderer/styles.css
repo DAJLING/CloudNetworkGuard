@@ -1,27 +1,28 @@
 :root {
   color-scheme: light;
-  --bg: #edf5f6;
-  --bg-2: #f7f2ff;
+  --bg: #f4f0ea;
+  --bg-2: #eaf5f7;
   --glass: rgba(255, 255, 255, 0.66);
   --glass-strong: rgba(255, 255, 255, 0.82);
   --glass-line: rgba(255, 255, 255, 0.78);
-  --ink: #10201b;
-  --muted: #5f6f75;
-  --soft: #77858a;
-  --line: rgba(58, 86, 92, 0.16);
-  --primary: #123c3a;
-  --primary-hover: #0b2d2c;
-  --accent: #0f766e;
-  --green: #0f7b4f;
-  --green-soft: #dff7eb;
+  --ink: #24282b;
+  --muted: #657079;
+  --soft: #7d858c;
+  --line: rgba(48, 54, 60, 0.16);
+  --primary: #2b2f32;
+  --primary-hover: #171a1d;
+  --accent: #c66f2e;
+  --accent-hover: #9b5428;
+  --success: #008fa3;
+  --success-soft: #d9f4f7;
   --red: #b42318;
   --red-soft: #ffe8e4;
   --amber: #a45f00;
   --amber-soft: #fff4d7;
-  --blue: #315a9d;
+  --blue: #386092;
   --blue-soft: #e7efff;
   --gray-soft: #edf0f2;
-  --shadow: 0 24px 70px rgba(39, 72, 84, 0.16);
+  --shadow: 0 24px 70px rgba(41, 43, 46, 0.16);
   --inner: inset 0 1px 0 rgba(255, 255, 255, 0.95);
   --radius: 8px;
   --ease: 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -40,7 +41,7 @@ body {
   min-height: 100vh;
   margin: 0;
   background:
-    linear-gradient(135deg, var(--bg) 0%, #f6fbf8 42%, var(--bg-2) 100%);
+    linear-gradient(135deg, var(--bg) 0%, #fbf7f0 42%, var(--bg-2) 100%);
   color: var(--ink);
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -55,8 +56,8 @@ body::before {
   inset: 0;
   pointer-events: none;
   background-image:
-    linear-gradient(rgba(18, 60, 58, 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(18, 60, 58, 0.04) 1px, transparent 1px);
+    linear-gradient(rgba(43, 47, 50, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(43, 47, 50, 0.04) 1px, transparent 1px);
   background-size: 34px 34px;
   mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.92), rgba(0, 0, 0, 0.16));
 }
@@ -180,8 +181,8 @@ p {
 
 .button:hover {
   transform: translateY(-1px);
-  border-color: rgba(18, 60, 58, 0.42);
-  box-shadow: 0 12px 26px rgba(37, 74, 80, 0.14);
+  border-color: rgba(198, 111, 46, 0.42);
+  box-shadow: 0 12px 26px rgba(68, 58, 48, 0.14);
 }
 
 .button:active {
@@ -191,20 +192,20 @@ p {
 .button:focus-visible,
 .tab:focus-visible,
 input:focus-visible {
-  outline: 3px solid rgba(15, 118, 110, 0.28);
+  outline: 3px solid rgba(198, 111, 46, 0.28);
   outline-offset: 2px;
 }
 
 .button.primary {
   border-color: var(--primary);
   background:
-    linear-gradient(135deg, var(--primary), #0f766e);
+    linear-gradient(135deg, var(--primary), var(--accent));
   color: #ffffff;
 }
 
 .button.primary:hover {
   background:
-    linear-gradient(135deg, var(--primary-hover), #0b655f);
+    linear-gradient(135deg, var(--primary-hover), var(--accent-hover));
 }
 
 .button.danger {
@@ -292,7 +293,7 @@ input:focus-visible {
 
 .metric-card:hover {
   transform: translateY(-2px);
-  border-color: rgba(15, 118, 110, 0.32);
+  border-color: rgba(198, 111, 46, 0.32);
 }
 
 .metric-card strong {
@@ -311,8 +312,8 @@ input:focus-visible {
 }
 
 .metrics-grid.pass .metric-card:first-child strong {
-  color: var(--green);
-  text-shadow: 0 0 22px rgba(15, 123, 79, 0.26);
+  color: var(--success);
+  text-shadow: 0 0 22px rgba(0, 143, 163, 0.26);
 }
 
 .metrics-grid.block .metric-card:first-child strong {
@@ -367,9 +368,9 @@ input:focus-visible {
   display: inline-grid;
   place-items: center;
   padding: 0 12px;
-  border: 1px solid rgba(15, 118, 110, 0.18);
-  background: rgba(223, 247, 235, 0.74);
-  color: var(--green);
+  border: 1px solid rgba(0, 143, 163, 0.18);
+  background: rgba(217, 244, 247, 0.74);
+  color: var(--success);
   font-size: 13px;
   font-weight: 850;
 }
@@ -401,7 +402,7 @@ input:focus-visible {
 }
 
 .field input:focus {
-  border-color: rgba(15, 118, 110, 0.45);
+  border-color: rgba(198, 111, 46, 0.45);
   background: rgba(255, 255, 255, 0.92);
 }
 
@@ -412,7 +413,7 @@ input:focus-visible {
 }
 
 .field-message.success {
-  color: var(--green);
+  color: var(--success);
 }
 
 .field-message.error {
@@ -497,6 +498,10 @@ input:focus-visible {
 .validation-options {
   display: grid;
   gap: 8px;
+}
+
+.validation-check-options {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .validation-panel .toggle-row {
@@ -622,7 +627,7 @@ code {
 }
 
 .status-text {
-  color: var(--green);
+  color: var(--success);
 }
 
 .danger-text {
@@ -670,7 +675,7 @@ code {
 
 .check-row:hover {
   transform: translateY(-1px);
-  border-color: rgba(15, 118, 110, 0.24);
+  border-color: rgba(198, 111, 46, 0.24);
   background: rgba(255, 255, 255, 0.72);
 }
 
@@ -696,8 +701,8 @@ code {
 }
 
 .check-row.pass .status-icon {
-  background: var(--green-soft);
-  color: var(--green);
+  background: var(--success-soft);
+  color: var(--success);
 }
 
 .check-row.fail .status-icon {
@@ -848,7 +853,7 @@ code {
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgba(16, 32, 27, 0.28);
+  background: rgba(36, 40, 43, 0.28);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
 }
@@ -864,8 +869,8 @@ code {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 16px;
-  background: rgba(16, 32, 27, 0.88);
-  color: #e8fff6;
+  background: rgba(36, 40, 43, 0.9);
+  color: #f8efe4;
   font-size: 12px;
   white-space: pre-wrap;
 }
@@ -981,6 +986,7 @@ code {
 
   .header-actions,
   .metrics-grid,
+  .validation-check-options,
   .switch-row,
   .config-lines div,
   .check-row,

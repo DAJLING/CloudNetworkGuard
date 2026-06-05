@@ -13,6 +13,20 @@ const { defaultDataDir } = require('./store');
 const TARGET_CONFIG_FILE = 'target-rules.json';
 const STATIC_IP_SKIP_VALUE = '0.0.0.0';
 
+const DEFAULT_VALIDATION_CHECKS = Object.freeze({
+  staticResidentialIp: true,
+  ipType: true,
+  region: true,
+  proxyRisk: true,
+  dns: true,
+  tcp: true,
+  tls: true,
+  controlHosts: true,
+  environment: true,
+  exitBinding: true,
+  usageRate: true
+});
+
 function defaultTargetConfigPath() {
   if (process.env.NETWORK_GUARD_TARGET_CONFIG) return process.env.NETWORK_GUARD_TARGET_CONFIG;
   return path.join(defaultDataDir(), TARGET_CONFIG_FILE);
@@ -96,11 +110,19 @@ function deriveHostsFromRules(rules) {
 function defaultValidation() {
   return {
     services: { claude: true, codex: true },
+    checks: { ...DEFAULT_VALIDATION_CHECKS },
     webProbe: { enabled: true, url: DEFAULT_TARGET_WEB_PROBE_URL },
     useCustomHosts: false,
     customHealthCheckHosts: [],
     customControlHosts: []
   };
+}
+
+function normalizeValidationChecks(rawChecks) {
+  const input = rawChecks && typeof rawChecks === 'object' ? rawChecks : {};
+  return Object.fromEntries(
+    Object.keys(DEFAULT_VALIDATION_CHECKS).map((checkId) => [checkId, input[checkId] !== false])
+  );
 }
 
 function normalizeValidation(raw) {
@@ -118,6 +140,7 @@ function normalizeValidation(raw) {
       claude: services.claude !== false,
       codex: services.codex !== false
     },
+    checks: normalizeValidationChecks(raw.checks),
     webProbe: {
       enabled: webProbe.enabled !== false,
       url:
@@ -147,10 +170,29 @@ function legacyValidationFromRaw(raw) {
   };
 }
 
+function hasTargetValidationChecks(validation) {
+  const normalized = normalizeValidation(validation);
+  return Boolean(
+    normalized.checks.dns ||
+      normalized.checks.tcp ||
+      normalized.checks.tls ||
+      normalized.checks.controlHosts
+  );
+}
+
+function hasEnabledValidationChecks(validation) {
+  const normalized = normalizeValidation(validation);
+  return Boolean(
+    normalized.webProbe.enabled ||
+      Object.values(normalized.checks).some(Boolean)
+  );
+}
+
 function resolveValidationHosts(validation) {
   const normalized = normalizeValidation(validation);
+  const needsTargetHosts = hasTargetValidationChecks(normalized);
 
-  if (!normalized.services.claude && !normalized.services.codex) {
+  if (needsTargetHosts && !normalized.useCustomHosts && !normalized.services.claude && !normalized.services.codex) {
     throw new Error('VALIDATION_SERVICE_REQUIRED');
   }
 
@@ -159,30 +201,30 @@ function resolveValidationHosts(validation) {
     const controlHosts = normalized.customControlHosts.length
       ? normalized.customControlHosts
       : healthCheckHosts.slice();
-    if (!healthCheckHosts.length) {
+    if (needsTargetHosts && !healthCheckHosts.length) {
       throw new Error('VALIDATION_CUSTOM_HOSTS_REQUIRED');
     }
     return {
       validation: normalized,
-      healthCheckHosts,
-      controlHosts,
+      healthCheckHosts: needsTargetHosts ? healthCheckHosts : [],
+      controlHosts: needsTargetHosts ? controlHosts : [],
       webProbeUrl: normalized.webProbe.enabled ? normalized.webProbe.url : null
     };
   }
 
   const healthCheckHosts = [];
   const controlHosts = [];
-  if (normalized.services.claude) {
+  if (needsTargetHosts && normalized.services.claude) {
     healthCheckHosts.push(...VALIDATION_SERVICES.claude.healthCheckHosts);
     controlHosts.push(...VALIDATION_SERVICES.claude.controlHosts);
   }
-  if (normalized.services.codex) {
+  if (needsTargetHosts && normalized.services.codex) {
     healthCheckHosts.push(...VALIDATION_SERVICES.codex.healthCheckHosts);
     controlHosts.push(...VALIDATION_SERVICES.codex.controlHosts);
   }
 
   let webProbeUrl = null;
-  if (normalized.webProbe.enabled && normalized.services.claude) {
+  if (normalized.webProbe.enabled) {
     webProbeUrl = normalized.webProbe.url || VALIDATION_SERVICES.claude.defaultWebProbeUrl;
   }
 
@@ -344,12 +386,15 @@ class TargetConfigManager {
 }
 
 module.exports = {
+  DEFAULT_VALIDATION_CHECKS,
   STATIC_IP_SKIP_VALUE,
   TARGET_CONFIG_FILE,
   defaultTargetConfig,
   defaultTargetConfigPath,
   defaultValidation,
   deriveHostsFromRules,
+  hasEnabledValidationChecks,
+  hasTargetValidationChecks,
   isValidIpv4,
   normalizeStaticResidentialIp,
   normalizeTargetConfig,

@@ -214,7 +214,8 @@
                   <h2>接口校验范围</h2>
                 </div>
               </div>
-              <p class="field-hint">选择 DNS / TCP / TLS / 强校验 / 网页探测要覆盖的服务。拦截规则可与此不同。</p>
+              <p class="field-hint">选择要覆盖的服务范围，并单独开启需要参与检测和保护判断的校验项。</p>
+              <span class="field-label">服务范围</span>
               <div class="validation-options">
                 <label class="toggle-row">
                   <span>Claude / Anthropic</span>
@@ -224,9 +225,56 @@
                   <span>Codex / OpenAI</span>
                   <input id="validationCodex" type="checkbox" checked />
                 </label>
+              </div>
+              <span class="field-label">校验项</span>
+              <div class="validation-options validation-check-options">
+                <label class="toggle-row">
+                  <span>静态住宅 IP</span>
+                  <input id="validationStaticResidentialIp" type="checkbox" checked />
+                </label>
+                <label class="toggle-row">
+                  <span>IP 类型</span>
+                  <input id="validationIpType" type="checkbox" checked />
+                </label>
+                <label class="toggle-row">
+                  <span>地区</span>
+                  <input id="validationRegion" type="checkbox" checked />
+                </label>
+                <label class="toggle-row">
+                  <span>代理风险</span>
+                  <input id="validationProxyRisk" type="checkbox" checked />
+                </label>
+                <label class="toggle-row">
+                  <span>DNS</span>
+                  <input id="validationDns" type="checkbox" checked />
+                </label>
+                <label class="toggle-row">
+                  <span>TCP</span>
+                  <input id="validationTcp" type="checkbox" checked />
+                </label>
+                <label class="toggle-row">
+                  <span>TLS</span>
+                  <input id="validationTls" type="checkbox" checked />
+                </label>
+                <label class="toggle-row">
+                  <span>强校验目标</span>
+                  <input id="validationControlHosts" type="checkbox" checked />
+                </label>
                 <label class="toggle-row">
                   <span>Claude 网页探测</span>
                   <input id="validationWebProbe" type="checkbox" checked />
+                </label>
+                <label class="toggle-row">
+                  <span>环境一致性</span>
+                  <input id="validationEnvironment" type="checkbox" checked />
+                </label>
+                <label class="toggle-row">
+                  <span>出口绑定</span>
+                  <input id="validationExitBinding" type="checkbox" checked />
+                </label>
+                <label class="toggle-row">
+                  <span>使用频率</span>
+                  <input id="validationUsageRate" type="checkbox" checked />
                 </label>
               </div>
               <label class="field-label" for="validationWebProbeUrl">网页探测 URL</label>

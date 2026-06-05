@@ -147,6 +147,32 @@ test('combineVerdicts still blocks provider risk when static IP check is skipped
   assert.equal(combined.reasons.includes(CheckReason.VPN_OR_PROXY_RISK), true);
 });
 
+test('combineVerdicts ignores provider reasons for disabled validation items', () => {
+  const combined = combineVerdicts({
+    externalAccess: { ok: true, results: [] },
+    providerScore: {
+      verdict: NetworkVerdict.BLOCK,
+      reasons: [CheckReason.BLOCKED_REGION],
+      riskScore: 100,
+      ipType: 'residential'
+    },
+    staticObservation: {
+      verdict: NetworkVerdict.PASS,
+      reason: null
+    },
+    enabledChecks: {
+      staticResidentialIp: false,
+      ipType: false,
+      region: false,
+      proxyRisk: false,
+      exitBinding: false
+    }
+  });
+
+  assert.equal(combined.verdict, NetworkVerdict.PASS);
+  assert.equal(combined.reasons.includes(CheckReason.BLOCKED_REGION), false);
+});
+
 test('combineVerdicts reports DNS and Claude control failures separately', () => {
   const combined = combineVerdicts({
     externalAccess: {

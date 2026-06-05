@@ -6,6 +6,7 @@ const fs = require('fs');
 const { GuardService, shouldUseSystemProxy } = require('../src/daemon/guard-service');
 const { Store } = require('../src/daemon/store');
 const { GuardMode, GuardState } = require('../src/shared/constants');
+const { DEFAULT_VALIDATION_CHECKS } = require('../src/daemon/target-config');
 
 test('GuardService persists enable and disable states without applying system proxy when skipped', async () => {
   process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY = '1';
@@ -264,6 +265,66 @@ test('GuardService blocks enable when static residential IP is missing', async (
   delete process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY;
 });
 
+test('GuardService skips static residential IP preflight when that check is disabled', async () => {
+  process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY = '1';
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
+  const store = new Store(path.join(tmp, 'state.json'));
+  const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
+  service.firewallManager.clearBlock = async () => ({ mode: 'CLEARED', rules: [] });
+  service.checker.providers = async () => [
+    {
+      source: 'fixture',
+      ip: '203.0.113.10',
+      ipType: 'residential',
+      countryCode: 'US',
+      regionName: 'United States',
+      isProxy: false,
+      isVpn: false,
+      isTor: false,
+      riskScore: 0,
+      confidence: 90
+    }
+  ];
+  service.checker.externalAccessCheck = async () => ({ ok: true, claudeControlOk: true, results: [] });
+  service.checker.claudeWebProbe = async () => ({ verdict: 'PASS', reasons: [], skipped: true });
+  service.checker.environmentCheck = () => ({ verdict: 'PASS', reasons: [], timeZone: 'America/New_York', language: 'en-US' });
+  await service.saveValidationConfig({
+    services: { claude: true, codex: true },
+    checks: { ...DEFAULT_VALIDATION_CHECKS, staticResidentialIp: false },
+    webProbe: { enabled: false, url: '' },
+    useCustomHosts: false
+  });
+
+  const status = await service.enableGuard();
+
+  assert.equal(status.guardState, GuardState.ENABLED);
+  assert.equal(status.actionRequired, null);
+
+  delete process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY;
+});
+
+test('GuardService keeps guard disabled when every validation check is disabled', async () => {
+  process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY = '1';
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
+  const store = new Store(path.join(tmp, 'state.json'));
+  const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
+  service.firewallManager.clearBlock = async () => ({ mode: 'CLEARED', rules: [] });
+  await service.saveValidationConfig({
+    services: { claude: false, codex: false },
+    checks: Object.fromEntries(Object.keys(DEFAULT_VALIDATION_CHECKS).map((key) => [key, false])),
+    webProbe: { enabled: false, url: '' },
+    useCustomHosts: false
+  });
+
+  const status = await service.enableGuard();
+
+  assert.equal(status.guardState, GuardState.DISABLED);
+  assert.equal(status.actionRequired.type, 'VALIDATION_CHECK_REQUIRED');
+  assert.equal(status.lastCheck.allowTargetTraffic, false);
+
+  delete process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY;
+});
+
 test('GuardService blocks enable when configured static residential IP does not match current exit', async () => {
   process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY = '1';
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
@@ -364,6 +425,28 @@ test('GuardService resetExitBinding clears the stored exit fingerprint', () => {
   assert.equal(status.binding.bound, false);
   assert.equal(store.getState().boundExitIpHash, null);
   assert.equal(status.logs[0].type, 'exit-binding-reset');
+});
+
+test('GuardService does not block target usage when usage-rate validation is disabled', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
+  const store = new Store(path.join(tmp, 'state.json'));
+  const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
+  service.targetConfig.validation.checks.usageRate = false;
+  store.update({
+    guardState: GuardState.ENABLED,
+    lastCheck: {
+      checkedAt: new Date().toISOString(),
+      verdict: 'PASS',
+      reasons: [],
+      allowTargetTraffic: true
+    },
+    usageEvents: Array.from({ length: 200 }, () => ({ host: 'api.openai.com', at: Date.now() }))
+  });
+
+  const result = service.recordTargetRequest('api.openai.com');
+
+  assert.equal(result.block, false);
+  assert.equal(store.getState().lastCheck.allowTargetTraffic, true);
 });
 
 test('GuardService rebindExitToCurrent binds the current provider IP without exposing it', async () => {

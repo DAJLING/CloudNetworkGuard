@@ -44,8 +44,19 @@ const els = {
   firewallHosts: document.querySelector('#firewallHosts'),
   validationClaude: document.querySelector('#validationClaude'),
   validationCodex: document.querySelector('#validationCodex'),
+  validationStaticResidentialIp: document.querySelector('#validationStaticResidentialIp'),
+  validationIpType: document.querySelector('#validationIpType'),
+  validationRegion: document.querySelector('#validationRegion'),
+  validationProxyRisk: document.querySelector('#validationProxyRisk'),
+  validationDns: document.querySelector('#validationDns'),
+  validationTcp: document.querySelector('#validationTcp'),
+  validationTls: document.querySelector('#validationTls'),
+  validationControlHosts: document.querySelector('#validationControlHosts'),
   validationWebProbe: document.querySelector('#validationWebProbe'),
   validationWebProbeUrl: document.querySelector('#validationWebProbeUrl'),
+  validationEnvironment: document.querySelector('#validationEnvironment'),
+  validationExitBinding: document.querySelector('#validationExitBinding'),
+  validationUsageRate: document.querySelector('#validationUsageRate'),
   validationCustomHosts: document.querySelector('#validationCustomHosts'),
   validationCustomFields: document.querySelector('#validationCustomFields'),
   validationHealthHosts: document.querySelector('#validationHealthHosts'),
@@ -81,6 +92,35 @@ const els = {
 
 let currentStatus = null;
 let shouldOpenStaticIpDialogAfterEnable = false;
+let appBusy = false;
+
+const validationCheckDefaults = {
+  staticResidentialIp: true,
+  ipType: true,
+  region: true,
+  proxyRisk: true,
+  dns: true,
+  tcp: true,
+  tls: true,
+  controlHosts: true,
+  environment: true,
+  exitBinding: true,
+  usageRate: true
+};
+
+const validationCheckElements = {
+  staticResidentialIp: () => els.validationStaticResidentialIp,
+  ipType: () => els.validationIpType,
+  region: () => els.validationRegion,
+  proxyRisk: () => els.validationProxyRisk,
+  dns: () => els.validationDns,
+  tcp: () => els.validationTcp,
+  tls: () => els.validationTls,
+  controlHosts: () => els.validationControlHosts,
+  environment: () => els.validationEnvironment,
+  exitBinding: () => els.validationExitBinding,
+  usageRate: () => els.validationUsageRate
+};
 
 const verdictLabels = {
   PASS: '通过',
@@ -246,6 +286,7 @@ async function reportEnvironment() {
 }
 
 function setBusy(isBusy) {
+  appBusy = isBusy;
   for (const button of [
     els.guardToggle,
     els.checkNow,
@@ -272,6 +313,7 @@ function setBusy(isBusy) {
   ]) {
     if (button) button.disabled = isBusy;
   }
+  applyPrimaryActionAvailability();
 }
 
 function setHelp(message, tone = 'neutral') {
@@ -385,19 +427,76 @@ function parseHostLines(value) {
     .filter(Boolean);
 }
 
-function updateValidationEditorState() {
+function normalizeValidationChecks(checks = {}) {
+  return Object.fromEntries(
+    Object.keys(validationCheckDefaults).map((checkId) => [checkId, checks[checkId] !== false])
+  );
+}
+
+function readValidationChecksFromForm() {
+  return Object.fromEntries(
+    Object.entries(validationCheckElements).map(([checkId, getElement]) => {
+      const input = getElement();
+      return [checkId, input ? Boolean(input.checked) : validationCheckDefaults[checkId]];
+    })
+  );
+}
+
+function hasTargetValidationChecks(checks = {}) {
+  return Boolean(checks.dns || checks.tcp || checks.tls || checks.controlHosts);
+}
+
+function hasEnabledValidationChecks(validation = {}) {
+  const checks = normalizeValidationChecks(validation.checks || {});
+  const webProbe = validation.webProbe || {};
+  return Boolean(webProbe.enabled !== false || Object.values(checks).some(Boolean));
+}
+
+function countEnabledValidationChecks(validation = {}) {
+  const checks = normalizeValidationChecks(validation.checks || {});
+  const webProbe = validation.webProbe || {};
+  return Object.values(checks).filter(Boolean).length + (webProbe.enabled !== false ? 1 : 0);
+}
+
+function hasEnabledValidationFormItems() {
+  const checks = readValidationChecksFromForm();
+  return Boolean(Object.values(checks).some(Boolean) || (els.validationWebProbe && els.validationWebProbe.checked));
+}
+
+function applyPrimaryActionAvailability() {
+  const status = currentStatus || {};
+  const guardEnabled = status.guardState === 'ENABLED';
+  const validation = status.targetConfig && status.targetConfig.validation ? status.targetConfig.validation : {};
+  const hasEnabledChecks = hasEnabledValidationChecks(validation);
+  const disabledReason = hasEnabledChecks ? '' : '请至少开启并保存一项校验';
+
+  if (els.checkNow) {
+    els.checkNow.disabled = appBusy || !hasEnabledChecks;
+    els.checkNow.title = disabledReason;
+  }
+  if (els.guardToggle) {
+    els.guardToggle.disabled = appBusy || (!guardEnabled && !hasEnabledChecks);
+    els.guardToggle.title = !guardEnabled ? disabledReason : '';
+  }
+}
+
+function updateValidationEditorState(options = {}) {
+  const preserveStatus = options && options.preserveStatus === true;
   if (!els.validationCustomFields) return;
   const custom = Boolean(els.validationCustomHosts && els.validationCustomHosts.checked);
   els.validationCustomFields.hidden = !custom;
 
-  const claudeEnabled = Boolean(els.validationClaude && els.validationClaude.checked);
   const webProbeEnabled = Boolean(els.validationWebProbe && els.validationWebProbe.checked);
-  if (els.validationWebProbe) {
-    els.validationWebProbe.disabled = !claudeEnabled;
-    if (!claudeEnabled) els.validationWebProbe.checked = false;
-  }
   if (els.validationWebProbeUrl) {
-    els.validationWebProbeUrl.disabled = !claudeEnabled || !webProbeEnabled;
+    els.validationWebProbeUrl.disabled = !webProbeEnabled;
+  }
+
+  if (els.validationStatus && !hasEnabledValidationFormItems()) {
+    els.validationStatus.textContent = '当前表单没有开启任何校验项，保存后立即检测和开启守卫会禁用。';
+    els.validationStatus.className = 'field-message';
+  } else if (els.validationStatus && !preserveStatus) {
+    els.validationStatus.textContent = '校验项已修改，保存后生效。';
+    els.validationStatus.className = 'field-message';
   }
 }
 
@@ -408,8 +507,14 @@ function renderValidationEditor(validation = {}, config = {}) {
   els.validationClaude.checked = services.claude !== false;
   els.validationCodex.checked = services.codex !== false;
 
+  const checks = normalizeValidationChecks(validation.checks || {});
+  for (const [checkId, getElement] of Object.entries(validationCheckElements)) {
+    const input = getElement();
+    if (input) input.checked = checks[checkId] !== false;
+  }
+
   const webProbe = validation.webProbe || {};
-  els.validationWebProbe.checked = webProbe.enabled !== false && Boolean(config.webProbeUrl || webProbe.url);
+  els.validationWebProbe.checked = webProbe.enabled !== false;
   els.validationWebProbeUrl.value = config.webProbeUrl || webProbe.url || 'https://claude.ai/';
 
   els.validationCustomHosts.checked = validation.useCustomHosts === true;
@@ -427,32 +532,43 @@ function renderValidationEditor(validation = {}, config = {}) {
   if (config.validationError) {
     els.validationStatus.textContent = `校验配置无效，已回退默认：${config.validationError}`;
     els.validationStatus.className = 'field-message error';
+  } else if (!hasEnabledValidationChecks(validation)) {
+    els.validationStatus.textContent = '当前没有开启的校验项，立即检测和开启守卫已禁用。';
+    els.validationStatus.className = 'field-message';
   } else {
+    const enabledCount = countEnabledValidationChecks(validation);
+    const serviceLabel = [
+      services.claude !== false ? 'Claude' : '',
+      services.codex !== false ? 'Codex' : ''
+    ].filter(Boolean).join(' + ') || '未选择目标服务';
     els.validationStatus.textContent = validation.useCustomHosts
-      ? '当前使用自定义主机列表。'
-      : `当前预设：${services.claude !== false ? 'Claude' : ''}${services.claude !== false && services.codex !== false ? ' + ' : ''}${services.codex !== false ? 'Codex' : ''}`;
+      ? `当前使用自定义主机列表，已开启 ${enabledCount} 项校验。`
+      : `当前预设：${serviceLabel}，已开启 ${enabledCount} 项校验。`;
     els.validationStatus.className = 'field-message';
   }
 
-  updateValidationEditorState();
+  updateValidationEditorState({ preserveStatus: true });
 }
 
 function readValidationInputFromForm() {
   const claude = Boolean(els.validationClaude && els.validationClaude.checked);
   const codex = Boolean(els.validationCodex && els.validationCodex.checked);
-  if (!claude && !codex) {
+  const checks = readValidationChecksFromForm();
+  const targetChecksEnabled = hasTargetValidationChecks(checks);
+  if (targetChecksEnabled && !claude && !codex && !(els.validationCustomHosts && els.validationCustomHosts.checked)) {
     throw new Error('请至少启用 Claude 或 Codex/OpenAI 其中一项校验。');
   }
 
   const useCustomHosts = Boolean(els.validationCustomHosts && els.validationCustomHosts.checked);
   const customHealthCheckHosts = parseHostLines(els.validationHealthHosts && els.validationHealthHosts.value);
   const customControlHosts = parseHostLines(els.validationControlHosts && els.validationControlHosts.value);
-  if (useCustomHosts && !customHealthCheckHosts.length) {
+  if (targetChecksEnabled && useCustomHosts && !customHealthCheckHosts.length) {
     throw new Error('自定义模式下请填写至少一个检测目标主机。');
   }
 
   return {
     services: { claude, codex },
+    checks,
     webProbe: {
       enabled: Boolean(els.validationWebProbe && els.validationWebProbe.checked),
       url: String(els.validationWebProbeUrl && els.validationWebProbeUrl.value || '').trim()
@@ -465,7 +581,10 @@ function readValidationInputFromForm() {
 
 function renderCheckItems(items = []) {
   if (!items.length) {
-    els.checkItems.innerHTML = '<div class="empty-state">尚未生成检测清单。点击“立即检测”或开启守卫后会显示逐项结果。</div>';
+    const validation = currentStatus && currentStatus.targetConfig ? currentStatus.targetConfig.validation : {};
+    els.checkItems.innerHTML = hasEnabledValidationChecks(validation)
+      ? '<div class="empty-state">尚未生成检测清单。点击“立即检测”或开启守卫后会显示逐项结果。</div>'
+      : '<div class="empty-state">当前没有开启的校验项。开启并保存至少一项后才能检测或开启守卫。</div>';
     return;
   }
 
@@ -776,6 +895,7 @@ function render(status) {
   renderEnvironmentConsistency(status.environmentConsistency || {});
   renderMonitoring(status.monitoring || {});
   renderSetup(status.setup || {});
+  applyPrimaryActionAvailability();
 }
 
 async function refresh() {
@@ -1050,7 +1170,18 @@ if (els.saveMonitoring) {
 for (const input of [
   els.validationClaude,
   els.validationCodex,
+  els.validationStaticResidentialIp,
+  els.validationIpType,
+  els.validationRegion,
+  els.validationProxyRisk,
+  els.validationDns,
+  els.validationTcp,
+  els.validationTls,
+  els.validationControlHosts,
   els.validationWebProbe,
+  els.validationEnvironment,
+  els.validationExitBinding,
+  els.validationUsageRate,
   els.validationCustomHosts
 ]) {
   if (input) input.addEventListener('change', updateValidationEditorState);
@@ -1062,9 +1193,11 @@ if (els.saveValidation) {
     try {
       const validation = readValidationInputFromForm();
       render(await window.networkGuard.saveValidationConfig(validation));
-      els.validationStatus.textContent = '校验配置已保存，建议立即检测。';
+      els.validationStatus.textContent = hasEnabledValidationChecks(validation)
+        ? '校验配置已保存，建议立即检测。'
+        : '校验配置已保存。当前没有开启的校验项，立即检测和开启守卫已禁用。';
       els.validationStatus.className = 'field-message success';
-      setHelp('接口校验范围已更新。', 'success');
+      setHelp(hasEnabledValidationChecks(validation) ? '接口校验范围已更新。' : '所有校验项已关闭。', 'success');
     } catch (error) {
       els.validationStatus.textContent = error.message || '保存失败。';
       els.validationStatus.className = 'field-message error';

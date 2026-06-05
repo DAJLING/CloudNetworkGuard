@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const dns = require('dns').promises;
-const { dnsProbe } = require('../src/daemon/network-checker');
+const { dnsProbe, NetworkChecker } = require('../src/daemon/network-checker');
 
 test('dnsProbe falls back to system resolver when direct DNS resolve is refused', async () => {
   const originalResolve = dns.resolve;
@@ -29,4 +29,63 @@ test('dnsProbe falls back to system resolver when direct DNS resolve is refused'
     dns.resolve = originalResolve;
     dns.lookup = originalLookup;
   }
+});
+
+test('NetworkChecker runs and reports only enabled validation items', async () => {
+  const state = {
+    salt: 'fixture-salt',
+    clientEnvironment: {
+      timeZone: 'America/New_York',
+      language: 'en-US',
+      languages: ['en-US'],
+      webRtcLocalIpCount: 0
+    },
+    environmentConsistency: {}
+  };
+  const store = {
+    getState: () => state,
+    update: (patch) => Object.assign(state, patch),
+    appendLog: () => {}
+  };
+  const checker = new NetworkChecker({
+    store,
+    providers: async () => {
+      throw new Error('providers should not run');
+    },
+    externalAccessCheck: async () => {
+      throw new Error('external access should not run');
+    },
+    claudeWebProbe: async () => {
+      throw new Error('web probe should not run');
+    },
+    getTargetConfig: () => ({
+      validation: {
+        services: { claude: false, codex: false },
+        checks: {
+          staticResidentialIp: false,
+          ipType: false,
+          region: false,
+          proxyRisk: false,
+          dns: false,
+          tcp: false,
+          tls: false,
+          controlHosts: false,
+          environment: true,
+          exitBinding: false,
+          usageRate: false
+        },
+        webProbe: { enabled: false, url: '' }
+      },
+      healthCheckHosts: [],
+      controlHosts: [],
+      webProbeUrl: null,
+      staticResidentialIp: ''
+    }),
+    now: () => 1000
+  });
+
+  const check = await checker.checkNow();
+
+  assert.equal(check.verdict, 'PASS');
+  assert.deepEqual(check.checkItems.map((item) => item.id), ['environment']);
 });

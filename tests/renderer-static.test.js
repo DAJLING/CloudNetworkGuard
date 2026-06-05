@@ -96,6 +96,9 @@ test('renderer exposes configurable validation target controls', () => {
 
   assert.match(html, /id="validationClaude"/);
   assert.match(html, /id="validationCodex"/);
+  assert.match(html, /id="validationStaticResidentialIp"/);
+  assert.match(html, /id="validationDns"/);
+  assert.match(html, /id="validationUsageRate"/);
   assert.match(html, /id="saveValidation"/);
   assert.match(html, /id="addTargetRule"/);
   assert.match(html, /id="saveTargetRules"/);
@@ -104,6 +107,7 @@ test('renderer exposes configurable validation target controls', () => {
   assert.match(html, /id="resetTargetConfigDefaults"/);
   assert.match(renderer, /renderTargetRuleEditor/);
   assert.match(renderer, /readTargetRulesFromEditor/);
+  assert.match(renderer, /readValidationChecksFromForm/);
   assert.match(renderer, /saveValidationConfig/);
   assert.match(renderer, /networkGuard\.saveTargetRules/);
   assert.match(preload, /saveValidationConfig: \(validation\) => ipcRenderer\.invoke\('guard:save-validation-config', validation\)/);

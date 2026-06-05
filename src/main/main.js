@@ -173,6 +173,11 @@ function wireIpc() {
     updateTray();
     return status;
   });
+  ipcMain.handle('guard:save-target-rules', async (_event, rules) => {
+    const status = await service.saveTargetRules(rules || []);
+    updateTray();
+    return status;
+  });
   ipcMain.handle('guard:reset-validation-defaults', async () => {
     const status = await service.resetValidationDefaults();
     updateTray();

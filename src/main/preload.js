@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('networkGuard', {
   checkNow: () => ipcRenderer.invoke('guard:check-now'),
   reloadRules: () => ipcRenderer.invoke('guard:reload-rules'),
   saveValidationConfig: (validation) => ipcRenderer.invoke('guard:save-validation-config', validation),
+  saveTargetRules: (rules) => ipcRenderer.invoke('guard:save-target-rules', rules),
   resetValidationDefaults: () => ipcRenderer.invoke('guard:reset-validation-defaults'),
   resetTargetConfigDefaults: () => ipcRenderer.invoke('guard:reset-target-config-defaults'),
   setStaticResidentialIp: (staticResidentialIp) => ipcRenderer.invoke('guard:set-static-residential-ip', staticResidentialIp),

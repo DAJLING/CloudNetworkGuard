@@ -311,6 +311,25 @@ class TargetConfigManager {
     return normalizeTargetConfig(raw, this.filePath);
   }
 
+  saveRules(rulesInput) {
+    const normalizedRules = Array.isArray(rulesInput)
+      ? rulesInput.map(normalizeRule).filter(Boolean)
+      : [];
+    if (!normalizedRules.length) throw new Error('TARGET_RULES_REQUIRED');
+
+    const ids = new Set();
+    for (const rule of normalizedRules) {
+      if (ids.has(rule.id)) throw new Error('TARGET_RULE_IDS_DUPLICATE');
+      ids.add(rule.id);
+    }
+
+    const raw = this.readRaw();
+    raw.rules = normalizedRules;
+    raw.firewallHosts = deriveHostsFromRules(normalizedRules);
+    this.saveRaw(raw);
+    return normalizeTargetConfig(raw, this.filePath);
+  }
+
   resetValidationToDefaults() {
     const raw = this.readRaw();
     this.applyResolvedValidation(raw, defaultValidation());

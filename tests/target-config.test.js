@@ -113,6 +113,31 @@ test('TargetConfigManager saves and resets validation config', () => {
   assert.equal(reset.healthCheckHosts.includes('api.openai.com'), true);
 });
 
+test('TargetConfigManager saves editable target rules and derives firewall hosts', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-targets-'));
+  const filePath = path.join(tmp, 'target-rules.json');
+  const manager = new TargetConfigManager({ filePath });
+  manager.load();
+
+  const saved = manager.saveRules([
+    { id: 'custom-api', domainPattern: 'https://api.example.com/v1', action: 'GUARD' },
+    { id: 'allowed-docs', domainPattern: 'docs.example.com', action: 'ALLOW' },
+    { id: 'wildcard', domainPattern: '*.example.org', action: 'GUARD' }
+  ]);
+
+  assert.deepEqual(saved.rules.map((rule) => rule.domainPattern), ['api.example.com', 'docs.example.com', '*.example.org']);
+  assert.deepEqual(saved.firewallHosts, ['api.example.com', 'example.org']);
+  assert.equal(saved.rules[1].action, 'ALLOW');
+});
+
+test('TargetConfigManager rejects empty editable target rules', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-targets-'));
+  const manager = new TargetConfigManager({ filePath: path.join(tmp, 'target-rules.json') });
+  manager.load();
+
+  assert.throws(() => manager.saveRules([]), /TARGET_RULES_REQUIRED/);
+});
+
 test('TargetConfigManager resetToDefaults restores factory target config', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-targets-'));
   const filePath = path.join(tmp, 'target-rules.json');

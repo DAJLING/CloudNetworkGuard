@@ -101,6 +101,8 @@ test('renderer exposes configurable validation target controls', () => {
   assert.match(html, /id="resetTargetConfigDefaults"/);
   assert.match(renderer, /saveValidationConfig/);
   assert.match(preload, /saveValidationConfig: \(validation\) => ipcRenderer\.invoke\('guard:save-validation-config', validation\)/);
+  assert.match(preload, /saveTargetRules: \(rules\) => ipcRenderer\.invoke\('guard:save-target-rules', rules\)/);
+  assert.match(main, /ipcMain\.handle\('guard:save-target-rules'/);
   assert.match(main, /ipcMain\.handle\('guard:reset-validation-defaults'/);
 });
 

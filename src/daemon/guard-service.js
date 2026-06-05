@@ -332,6 +332,13 @@ class GuardService {
     return this.reloadTargetConfig();
   }
 
+  async saveTargetRules(rulesInput) {
+    this.targetConfig = this.targetConfigManager.saveRules(rulesInput);
+    const status = await this.reloadTargetConfig();
+    this.emit({ type: 'target-rules-saved', status });
+    return status;
+  }
+
   async resetValidationDefaults() {
     this.targetConfig = this.targetConfigManager.resetValidationToDefaults();
     return this.reloadTargetConfig();

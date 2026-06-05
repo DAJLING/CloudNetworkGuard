@@ -234,6 +234,20 @@ test('GuardService reloads editable target config into status and firewall manag
   assert.deepEqual(clearCalls[0], [{ name: 'old-rule', remoteIp: '203.0.113.8' }]);
 });
 
+test('GuardService saveTargetRules persists rules and reloads firewall hosts', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
+  const store = new Store(path.join(tmp, 'state.json'));
+  const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
+  service.firewallManager.clearBlock = async () => ({ mode: 'CLEARED', rules: [] });
+
+  const status = await service.saveTargetRules([
+    { id: 'custom-api', domainPattern: 'api.example.com', action: 'GUARD' }
+  ]);
+
+  assert.equal(status.targetConfig.rules.length, 1);
+  assert.deepEqual(service.firewallManager.hosts, ['api.example.com']);
+});
+
 test('GuardService blocks enable when static residential IP is missing', async () => {
   process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY = '1';
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));

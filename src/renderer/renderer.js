@@ -36,6 +36,9 @@ const els = {
   configStatus: document.querySelector('#configStatus'),
   configError: document.querySelector('#configError'),
   targetRules: document.querySelector('#targetRules'),
+  addTargetRule: document.querySelector('#addTargetRule'),
+  saveTargetRules: document.querySelector('#saveTargetRules'),
+  targetRulesStatus: document.querySelector('#targetRulesStatus'),
   healthHosts: document.querySelector('#healthHosts'),
   controlHosts: document.querySelector('#controlHosts'),
   firewallHosts: document.querySelector('#firewallHosts'),
@@ -309,27 +312,59 @@ function renderTargets(config = {}) {
     els.configError.textContent = '';
   }
 
-  if (!rules.length) {
-    els.targetRules.innerHTML = '<div class="empty-state">当前没有启用的拦截规则</div>';
-  } else {
-    els.targetRules.innerHTML = rules
-      .map((rule) => {
-        const actionClass = rule.action === 'GUARD' ? 'guard' : 'allow';
-        return `
-          <div class="target-row">
-            <span class="rule-action ${actionClass}">${escapeHtml(rule.action)}</span>
-            <strong>${escapeHtml(rule.domainPattern)}</strong>
-            <span>${escapeHtml(rule.id)}</span>
-          </div>
-        `;
-      })
-      .join('');
-  }
+  renderTargetRuleEditor(rules);
 
   renderChipList(els.healthHosts, config.healthCheckHosts || []);
   renderChipList(els.controlHosts, config.controlHosts || []);
   renderChipList(els.firewallHosts, config.firewallHosts || []);
   renderValidationEditor(config.validation || {}, config);
+}
+
+function renderTargetRuleEditor(rules = []) {
+  if (!els.targetRules) return;
+  if (!rules.length) {
+    els.targetRules.innerHTML = '<div class="empty-state">当前没有启用的拦截规则</div>';
+    return;
+  }
+
+  els.targetRules.innerHTML = rules
+    .map((rule, index) => `
+      <div class="target-row editable" data-rule-index="${index}">
+        <input class="text-input rule-id-input" type="text" value="${escapeHtml(rule.id)}" aria-label="规则 ID" />
+        <input class="text-input rule-domain-input" type="text" value="${escapeHtml(rule.domainPattern)}" aria-label="规则域名" />
+        <select class="text-input rule-action-input" aria-label="规则动作">
+          <option value="GUARD"${rule.action === 'GUARD' ? ' selected' : ''}>GUARD</option>
+          <option value="ALLOW"${rule.action === 'ALLOW' ? ' selected' : ''}>ALLOW</option>
+        </select>
+        <button class="button secondary remove-rule" type="button" data-remove-rule="${index}">删除</button>
+      </div>
+    `)
+    .join('');
+}
+
+function readTargetRulesFromEditor({ validate = true } = {}) {
+  const rows = Array.from(els.targetRules ? els.targetRules.querySelectorAll('.target-row.editable') : []);
+  const rules = rows.map((row, index) => {
+    const idInput = row.querySelector('.rule-id-input');
+    const domainInput = row.querySelector('.rule-domain-input');
+    const actionInput = row.querySelector('.rule-action-input');
+    return {
+      id: String((idInput && idInput.value) || `target-${index + 1}`).trim() || `target-${index + 1}`,
+      domainPattern: String((domainInput && domainInput.value) || '').trim(),
+      action: actionInput && actionInput.value === 'ALLOW' ? 'ALLOW' : 'GUARD'
+    };
+  });
+
+  if (!validate) return rules;
+  if (!rules.length) throw new Error('请至少保留一条目标规则。');
+
+  const ids = new Set();
+  for (const rule of rules) {
+    if (!rule.domainPattern) throw new Error('请填写每条规则的域名或 URL。');
+    if (ids.has(rule.id)) throw new Error('规则 ID 不能重复。');
+    ids.add(rule.id);
+  }
+  return rules;
 }
 
 function hostsToTextarea(hosts = []) {
@@ -909,6 +944,55 @@ els.reloadRules.addEventListener('click', async () => {
     setBusy(false);
   }
 });
+
+if (els.targetRules) {
+  els.targetRules.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-remove-rule]');
+    if (!button) return;
+    const rules = readTargetRulesFromEditor({ validate: false });
+    rules.splice(Number(button.dataset.removeRule), 1);
+    renderTargetRuleEditor(rules);
+  });
+}
+
+if (els.addTargetRule) {
+  els.addTargetRule.addEventListener('click', () => {
+    const rules = readTargetRulesFromEditor({ validate: false });
+    rules.push({
+      id: `custom-${Date.now().toString(36)}`,
+      domainPattern: '',
+      action: 'GUARD'
+    });
+    renderTargetRuleEditor(rules);
+    if (els.targetRulesStatus) {
+      els.targetRulesStatus.textContent = '请填写新规则域名后保存。';
+      els.targetRulesStatus.className = 'field-message';
+    }
+  });
+}
+
+if (els.saveTargetRules) {
+  els.saveTargetRules.addEventListener('click', async () => {
+    setBusy(true);
+    try {
+      const rules = readTargetRulesFromEditor();
+      render(await window.networkGuard.saveTargetRules(rules));
+      if (els.targetRulesStatus) {
+        els.targetRulesStatus.textContent = '拦截规则已保存。';
+        els.targetRulesStatus.className = 'field-message success';
+      }
+      setHelp('拦截规则已更新。', 'success');
+    } catch (error) {
+      if (els.targetRulesStatus) {
+        els.targetRulesStatus.textContent = error.message || '规则保存失败。';
+        els.targetRulesStatus.className = 'field-message error';
+      }
+      setHelp(error.message || '规则保存失败。', 'error');
+    } finally {
+      setBusy(false);
+    }
+  });
+}
 
 for (const input of [
   els.validationClaude,

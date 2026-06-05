@@ -749,6 +749,22 @@ code {
   padding: 12px 14px;
 }
 
+.target-row.editable {
+  grid-template-columns: minmax(110px, 0.45fr) minmax(180px, 1fr) 110px 84px;
+  gap: 8px;
+  align-items: center;
+}
+
+.target-row.editable .text-input {
+  width: 100%;
+  min-height: 38px;
+}
+
+.rule-editor-actions {
+  margin-top: 12px;
+  justify-content: flex-end;
+}
+
 .target-row > span:last-child {
   color: var(--muted);
   font-size: 13px;

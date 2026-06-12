@@ -9,7 +9,7 @@ const { CheckReason, NetworkVerdict } = require('../shared/constants');
 const { normalizeHost } = require('./rules');
 const { STATIC_IP_SKIP_VALUE } = require('./target-config');
 
-const TARGET_HEALTH_HOSTS = ['claude.ai', 'api.openai.com', 'api.anthropic.com'];
+const TARGET_HEALTH_HOSTS = ['claude.ai', 'api.anthropic.com'];
 const CLAUDE_CONTROL_HOSTS = ['claude.ai', 'api.anthropic.com'];
 
 async function dnsProbe(host) {

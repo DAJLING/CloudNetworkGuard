@@ -22,7 +22,7 @@ test('TargetConfigManager writes a default editable config file', () => {
 
   assert.equal(fs.existsSync(filePath), true);
   assert.equal(config.rules.some((rule) => rule.domainPattern === 'claude.ai'), true);
-  assert.equal(config.rules.some((rule) => rule.domainPattern === 'api.openai.com'), true);
+  assert.equal(config.rules.some((rule) => rule.domainPattern === '*.anthropic.com'), true);
   assert.equal(config.firewallHosts.includes('claude.ai'), true);
   assert.equal(config.staticResidentialIp, '');
   assert.deepEqual(config.validation.checks, DEFAULT_VALIDATION_CHECKS);
@@ -33,33 +33,32 @@ test('normalizeTargetConfig supports user-added and removed target rules', () =>
     {
       version: 1,
       rules: [
-        { id: 'custom-api', domainPattern: 'https://api.example.com/v1/messages', action: 'GUARD' },
-        { id: 'custom-web', domainPattern: '*.example.org', action: 'GUARD' }
+        { id: 'custom-api', domainPattern: 'https://api.anthropic.com/v1/messages', action: 'GUARD' },
+        { id: 'custom-web', domainPattern: '*.claude.ai', action: 'GUARD' }
       ],
-      healthCheckHosts: ['api.example.com'],
-      controlHosts: ['api.example.com']
+      healthCheckHosts: ['api.anthropic.com'],
+      controlHosts: ['api.anthropic.com']
     },
     'fixture.json'
   );
 
   assert.deepEqual(
     config.rules.map((rule) => rule.domainPattern),
-    ['api.example.com', '*.example.org']
+    ['api.anthropic.com', '*.claude.ai']
   );
-  assert.deepEqual(config.healthCheckHosts, ['api.example.com']);
-  assert.deepEqual(config.controlHosts, ['api.example.com']);
-  assert.equal(config.firewallHosts.includes('example.org'), true);
-  assert.equal(config.rules.some((rule) => rule.domainPattern === 'claude.ai'), false);
+  assert.deepEqual(config.healthCheckHosts, ['api.anthropic.com']);
+  assert.deepEqual(config.controlHosts, ['api.anthropic.com']);
+  assert.equal(config.firewallHosts.includes('claude.ai'), true);
 });
 
 test('deriveHostsFromRules converts wildcard rules into firewall host candidates', () => {
   assert.deepEqual(
     deriveHostsFromRules([
-      { domainPattern: '*.openai.com', action: 'GUARD' },
-      { domainPattern: 'chatgpt.com', action: 'GUARD' },
-      { domainPattern: 'ignored.example.com', action: 'ALLOW' }
+      { domainPattern: '*.anthropic.com', action: 'GUARD' },
+      { domainPattern: 'claude.ai', action: 'GUARD' },
+      { domainPattern: 'status.anthropic.com', action: 'ALLOW' }
     ]),
-    ['openai.com', 'chatgpt.com']
+    ['anthropic.com', 'claude.ai']
   );
 });
 
@@ -75,7 +74,7 @@ test('TargetConfigManager validates and saves static residential IP', () => {
 
 test('resolveValidationHosts supports Claude-only validation', () => {
   const resolved = resolveValidationHosts({
-    services: { claude: true, codex: false },
+    services: { claude: true },
     webProbe: { enabled: true, url: 'https://claude.ai/' },
     useCustomHosts: false
   });
@@ -85,21 +84,9 @@ test('resolveValidationHosts supports Claude-only validation', () => {
   assert.equal(resolved.webProbeUrl, 'https://claude.ai/');
 });
 
-test('resolveValidationHosts supports Codex-only validation without web probe', () => {
-  const resolved = resolveValidationHosts({
-    services: { claude: false, codex: true },
-    webProbe: { enabled: false, url: 'https://claude.ai/' },
-    useCustomHosts: false
-  });
-
-  assert.deepEqual(resolved.healthCheckHosts, ['api.openai.com', 'chat.openai.com', 'auth.openai.com']);
-  assert.deepEqual(resolved.controlHosts, ['api.openai.com']);
-  assert.equal(resolved.webProbeUrl, null);
-});
-
 test('resolveValidationHosts allows non-target checks without selected services', () => {
   const resolved = resolveValidationHosts({
-    services: { claude: false, codex: false },
+    services: { claude: false },
     checks: {
       ...DEFAULT_VALIDATION_CHECKS,
       dns: false,
@@ -118,7 +105,7 @@ test('resolveValidationHosts allows non-target checks without selected services'
 
 test('resolveValidationHosts supports saving all validation checks disabled', () => {
   const resolved = resolveValidationHosts({
-    services: { claude: false, codex: false },
+    services: { claude: false },
     checks: Object.fromEntries(Object.keys(DEFAULT_VALIDATION_CHECKS).map((key) => [key, false])),
     webProbe: { enabled: false, url: '' },
     useCustomHosts: false
@@ -137,16 +124,16 @@ test('TargetConfigManager saves and resets validation config', () => {
   manager.load();
 
   const saved = manager.saveValidation({
-    services: { claude: true, codex: false },
+    services: { claude: true },
     webProbe: { enabled: true, url: 'https://claude.ai/' },
     useCustomHosts: false
   });
-  assert.equal(saved.validation.services.codex, false);
+  assert.deepEqual(saved.validation.services, { claude: true });
   assert.deepEqual(saved.healthCheckHosts, ['claude.ai', 'api.anthropic.com']);
 
   const reset = manager.resetValidationToDefaults();
   assert.deepEqual(reset.validation.services, defaultValidation().services);
-  assert.equal(reset.healthCheckHosts.includes('api.openai.com'), true);
+  assert.deepEqual(reset.healthCheckHosts, ['claude.ai', 'api.anthropic.com']);
 });
 
 test('TargetConfigManager saves editable target rules and derives firewall hosts', () => {
@@ -156,14 +143,44 @@ test('TargetConfigManager saves editable target rules and derives firewall hosts
   manager.load();
 
   const saved = manager.saveRules([
-    { id: 'custom-api', domainPattern: 'https://api.example.com/v1', action: 'GUARD' },
-    { id: 'allowed-docs', domainPattern: 'docs.example.com', action: 'ALLOW' },
-    { id: 'wildcard', domainPattern: '*.example.org', action: 'GUARD' }
+    { id: 'custom-api', domainPattern: 'https://api.anthropic.com/v1', action: 'GUARD' },
+    { id: 'allowed-status', domainPattern: 'status.anthropic.com', action: 'ALLOW' },
+    { id: 'wildcard', domainPattern: '*.claude.ai', action: 'GUARD' }
   ]);
 
-  assert.deepEqual(saved.rules.map((rule) => rule.domainPattern), ['api.example.com', 'docs.example.com', '*.example.org']);
-  assert.deepEqual(saved.firewallHosts, ['api.example.com', 'example.org']);
+  assert.deepEqual(saved.rules.map((rule) => rule.domainPattern), ['api.anthropic.com', 'status.anthropic.com', '*.claude.ai']);
+  assert.deepEqual(saved.firewallHosts, ['api.anthropic.com', 'claude.ai']);
   assert.equal(saved.rules[1].action, 'ALLOW');
+});
+
+test('TargetConfigManager rejects targets outside Claude and Anthropic', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-targets-'));
+  const manager = new TargetConfigManager({ filePath: path.join(tmp, 'target-rules.json') });
+  manager.load();
+
+  assert.throws(
+    () => manager.saveRules([{ id: 'other', domainPattern: 'api.example.com', action: 'GUARD' }]),
+    /CLAUDE_TARGET_REQUIRED/
+  );
+});
+
+test('normalizeTargetConfig removes legacy non-Claude targets', () => {
+  const config = normalizeTargetConfig(
+    {
+      version: 1,
+      rules: [
+        { id: 'claude-web', domainPattern: 'claude.ai', action: 'GUARD' },
+        { id: 'legacy-other', domainPattern: 'api.example.com', action: 'GUARD' }
+      ],
+      healthCheckHosts: ['claude.ai', 'api.example.com'],
+      firewallHosts: ['claude.ai', 'api.example.com']
+    },
+    'fixture.json'
+  );
+
+  assert.deepEqual(config.rules.map((rule) => rule.domainPattern), ['claude.ai']);
+  assert.deepEqual(config.healthCheckHosts, ['claude.ai']);
+  assert.deepEqual(config.firewallHosts, ['claude.ai']);
 });
 
 test('TargetConfigManager rejects empty editable target rules', () => {
@@ -179,15 +196,18 @@ test('TargetConfigManager resetToDefaults restores factory target config', () =>
   const filePath = path.join(tmp, 'target-rules.json');
   const manager = new TargetConfigManager({ filePath });
   manager.saveValidation({
-    services: { claude: true, codex: false },
+    services: { claude: true },
     webProbe: { enabled: false, url: '' },
     useCustomHosts: false
   });
 
   const reset = manager.resetToDefaults();
   assert.equal(reset.validation.services.claude, true);
-  assert.equal(reset.validation.services.codex, true);
-  assert.equal(reset.rules.some((rule) => rule.domainPattern === 'api.openai.com'), true);
+  assert.deepEqual(reset.rules.map((rule) => rule.domainPattern), [
+    '*.anthropic.com',
+    'claude.ai',
+    '*.claude.ai'
+  ]);
 });
 
 test('normalizeStaticResidentialIp supports empty values for first-run setup', () => {

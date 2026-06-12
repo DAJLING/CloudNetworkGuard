@@ -6,25 +6,19 @@ const path = require('path');
 const { execFile } = require('child_process');
 const { MacCommandRunner } = require('./macos-command-runner');
 
-const FIREWALL_RULE_PREFIX = 'ClaudeCodexNetworkGuard';
+const FIREWALL_RULE_PREFIX = 'ClaudeNetworkGuard';
 const FIREWALL_TARGET_HOSTS = [
   'claude.ai',
   'api.anthropic.com',
-  'anthropic.com',
-  'api.openai.com',
-  'chat.openai.com',
-  'auth.openai.com',
-  'platform.openai.com',
-  'openai.com',
-  'chatgpt.com'
+  'anthropic.com'
 ];
-const HOSTS_BLOCK_START = '# ClaudeCodexNetworkGuard START';
-const HOSTS_BLOCK_END = '# ClaudeCodexNetworkGuard END';
-const PF_ANCHOR_NAME = 'com.local.claude-codex-network-guard';
+const HOSTS_BLOCK_START = '# ClaudeNetworkGuard START';
+const HOSTS_BLOCK_END = '# ClaudeNetworkGuard END';
+const PF_ANCHOR_NAME = 'com.local.claude-network-guard';
 const PF_ANCHOR_PATH = `/etc/pf.anchors/${PF_ANCHOR_NAME}`;
 const PF_CONF_PATH = '/etc/pf.conf';
-const PF_CONF_BLOCK_START = '# ClaudeCodexNetworkGuard PF START';
-const PF_CONF_BLOCK_END = '# ClaudeCodexNetworkGuard PF END';
+const PF_CONF_BLOCK_START = '# ClaudeNetworkGuard PF START';
+const PF_CONF_BLOCK_END = '# ClaudeNetworkGuard PF END';
 
 function execFilePromise(command, args) {
   return new Promise((resolve, reject) => {

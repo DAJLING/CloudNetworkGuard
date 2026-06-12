@@ -88,6 +88,28 @@ test('renderer exposes environment consistency controls', () => {
   assert.doesNotMatch(renderer, /仅 Windows/);
 });
 
+test('renderer gives actionable restore guidance when browsers are running', () => {
+  const renderer = readProjectFile('src/renderer/renderer.js');
+
+  assert.match(renderer, /isBrowserRunningPreflight\(restoreResult\.steps\)/);
+  assert.match(renderer, /再重试还原环境/);
+  assert.match(renderer, /formatRunningBrowsers/);
+});
+
+test('renderer translates internal error codes before showing them', () => {
+  const renderer = readProjectFile('src/renderer/renderer.js');
+
+  assert.match(renderer, /const userErrorMessages =/);
+  assert.match(renderer, /BACKUP_NOT_FOUND: '还没有可还原的环境备份/);
+  assert.match(renderer, /TARGET_RULES_REQUIRED: '请至少保留一条目标规则。'/);
+  assert.match(renderer, /PROXY_RESTORE_FAILED: '代理设置恢复失败/);
+  assert.match(renderer, /MONITORING_INTERVAL_INVALID: '监控间隔需在 1 到 1440 分钟之间。'/);
+  assert.match(renderer, /formatStepFailures\(result\.steps/);
+  assert.doesNotMatch(renderer, /\.textContent = error\.message/);
+  assert.doesNotMatch(renderer, /setHelp\(error\.message/);
+  assert.doesNotMatch(renderer, /配置读取失败：\$\{config\.error\}/);
+});
+
 test('renderer exposes configurable validation target controls', () => {
   const html = readProjectFile('src/renderer/index.html');
   const renderer = readProjectFile('src/renderer/renderer.js');
@@ -95,7 +117,7 @@ test('renderer exposes configurable validation target controls', () => {
   const main = readProjectFile('src/main/main.js');
 
   assert.match(html, /id="validationClaude"/);
-  assert.match(html, /id="validationCodex"/);
+  assert.doesNotMatch(html, /validationCodex/);
   assert.match(html, /id="validationStaticResidentialIp"/);
   assert.match(html, /id="validationDns"/);
   assert.match(html, /id="validationUsageRate"/);
@@ -154,7 +176,7 @@ test('README documents macOS pf firewall fallback', () => {
   const readme = readProjectFile('README.md');
 
   assert.match(readme, /macOS firewall fallback/);
-  assert.match(readme, /\/etc\/pf\.anchors\/com\.local\.claude-codex-network-guard/);
+  assert.match(readme, /\/etc\/pf\.anchors\/com\.local\.claude-network-guard/);
   assert.match(readme, /administrator authorization/);
   assert.match(readme, /Targets view/);
   assert.match(readme, /Periodic monitoring/);

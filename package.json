@@ -1,7 +1,7 @@
 {
-  "name": "claude-codex-network-guard",
+  "name": "claude-network-guard",
   "version": "0.1.0",
-  "description": "Windows/macOS desktop guard that blocks Claude/Codex traffic when the network is not clean static residential egress.",
+  "description": "Windows/macOS desktop guard that protects Claude traffic when the network is not clean static residential egress.",
   "main": "src/main/main.js",
   "private": true,
   "type": "commonjs",
@@ -21,7 +21,7 @@
     "network",
     "proxy",
     "claude",
-    "codex"
+    "anthropic"
   ],
   "author": "Local",
   "license": "MIT",
@@ -30,8 +30,8 @@
     "electron-builder": "^26.8.1"
   },
   "build": {
-    "appId": "com.local.claude-codex-network-guard",
-    "productName": "Claude Codex Network Guard",
+    "appId": "com.local.claude-network-guard",
+    "productName": "Claude Network Guard",
     "files": [
       "assets/**/*",
       "src/**/*",

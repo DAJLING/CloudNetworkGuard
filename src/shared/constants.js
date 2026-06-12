@@ -42,18 +42,10 @@ const CheckReason = Object.freeze({
 const DEFAULT_TARGET_RULES = [
   { id: 'anthropic-api', domainPattern: '*.anthropic.com', processNames: [], action: 'GUARD' },
   { id: 'claude-web', domainPattern: 'claude.ai', processNames: [], action: 'GUARD' },
-  { id: 'claude-subdomains', domainPattern: '*.claude.ai', processNames: [], action: 'GUARD' },
-  { id: 'openai-api', domainPattern: 'api.openai.com', processNames: [], action: 'GUARD' },
-  { id: 'openai-chat-api', domainPattern: 'chat.openai.com', processNames: [], action: 'GUARD' },
-  { id: 'openai-auth', domainPattern: 'auth.openai.com', processNames: [], action: 'GUARD' },
-  { id: 'openai-platform', domainPattern: 'platform.openai.com', processNames: [], action: 'GUARD' },
-  { id: 'openai-web', domainPattern: 'openai.com', processNames: [], action: 'GUARD' },
-  { id: 'openai-subdomains', domainPattern: '*.openai.com', processNames: [], action: 'GUARD' },
-  { id: 'chatgpt-web', domainPattern: 'chatgpt.com', processNames: [], action: 'GUARD' },
-  { id: 'chatgpt-subdomains', domainPattern: '*.chatgpt.com', processNames: [], action: 'GUARD' }
+  { id: 'claude-subdomains', domainPattern: '*.claude.ai', processNames: [], action: 'GUARD' }
 ];
 
-const DEFAULT_TARGET_HEALTH_HOSTS = ['claude.ai', 'api.openai.com', 'api.anthropic.com'];
+const DEFAULT_TARGET_HEALTH_HOSTS = ['claude.ai', 'api.anthropic.com'];
 const DEFAULT_TARGET_CONTROL_HOSTS = ['claude.ai', 'api.anthropic.com'];
 const DEFAULT_TARGET_WEB_PROBE_URL = 'https://claude.ai/';
 
@@ -64,13 +56,6 @@ const VALIDATION_SERVICES = Object.freeze({
     healthCheckHosts: ['claude.ai', 'api.anthropic.com'],
     controlHosts: ['claude.ai', 'api.anthropic.com'],
     defaultWebProbeUrl: DEFAULT_TARGET_WEB_PROBE_URL
-  }),
-  codex: Object.freeze({
-    id: 'codex',
-    label: 'Codex / OpenAI',
-    healthCheckHosts: ['api.openai.com', 'chat.openai.com', 'auth.openai.com'],
-    controlHosts: ['api.openai.com'],
-    defaultWebProbeUrl: null
   })
 });
 

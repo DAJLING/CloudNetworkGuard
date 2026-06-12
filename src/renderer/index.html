@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Claude Codex Network Guard</title>
+    <title>Claude Network Guard</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -13,7 +13,7 @@
           <img class="brand-icon" src="../../assets/app-icon.png" alt="" />
           <div class="brand-block">
             <span class="product-kicker">Network Guard</span>
-            <h1>Claude / Codex 网络守卫</h1>
+            <h1>Claude 网络守卫</h1>
             <p id="summary">正在读取守卫状态...</p>
           </div>
         </div>
@@ -25,7 +25,8 @@
 
       <nav class="tabs glass-panel" aria-label="主要视图">
         <button class="tab is-active" type="button" data-view-tab="overview" aria-selected="true">总览</button>
-        <button class="tab" type="button" data-view-tab="targets" aria-selected="false">拦截目标</button>
+        <button class="tab" type="button" data-view-tab="targets" aria-selected="false">拦截规则</button>
+        <button class="tab" type="button" data-view-tab="settings" aria-selected="false">可选配置</button>
         <button class="tab" type="button" data-view-tab="report" aria-selected="false">检测报告</button>
         <button class="tab" type="button" data-view-tab="activity" aria-selected="false">事件日志</button>
       </nav>
@@ -81,106 +82,31 @@
               <div id="fixActions" class="fix-actions" aria-label="修复操作"></div>
             </article>
 
-            <article class="panel glass-panel action-panel">
-              <div class="panel-title">
-                <div>
-                  <span class="eyebrow">Controls</span>
-                  <h2>快速操作</h2>
-                </div>
-              </div>
-              <label class="field">
-                <span>静态住宅 IP</span>
-                <input id="staticResidentialIp" type="text" inputmode="decimal" autocomplete="off" placeholder="例如 203.0.113.10" />
-                <small id="staticIpHelp">填写 0.0.0.0 表示跳过静态 IP 校验。</small>
-              </label>
-              <button id="saveStaticIp" class="button secondary wide" type="button">保存静态 IP</button>
-              <div class="restore-box">
-                <div>
-                  <strong>网络恢复</strong>
-                  <small>关闭守卫，并清理本应用写入的代理、防火墙和 hosts 设置。</small>
-                </div>
-                <button id="emergencyRestore" class="button danger wide" type="button">恢复网络</button>
-                <small id="recoveryStatus" class="field-message" aria-live="polite">尚未执行恢复。</small>
-              </div>
-              <div class="consistency-box">
-                <div>
-                  <strong>环境一致性</strong>
-                  <small id="environmentConsistencySummary">尚未对齐环境</small>
-                </div>
-                <label class="switch-row">
-                  <span>
-                    <strong>启用对齐</strong>
-                    <small id="environmentConsistencyTarget">跟随出口 IP</small>
-                  </span>
-                  <input id="environmentConsistencyToggle" type="checkbox" />
-                </label>
-                <label class="switch-row compact">
-                  <span>
-                    <input id="deriveFromExitIp" type="checkbox" checked />
-                    跟随出口 IP 自动选择
-                  </span>
-                </label>
-                <label class="switch-row compact">
-                  <span>
-                    <input id="keepChineseInput" type="checkbox" checked />
-                    保留中文输入法（推荐开启）
-                  </span>
-                </label>
-                <label class="field compact">
-                  <span>目标时区 (IANA)</span>
-                  <input id="profileOverrideTimeZone" type="text" placeholder="留空=自动" autocomplete="off" />
-                </label>
-                <label class="field compact">
-                  <span>目标语言</span>
-                  <input id="profileOverrideLanguage" type="text" placeholder="留空=自动" autocomplete="off" />
-                </label>
-                <button id="applyEnvironmentConsistency" class="button primary wide" type="button">一键对齐环境</button>
-                <button id="restoreEnvironmentConsistency" class="button secondary wide" type="button">还原原始环境</button>
-                <button id="backupEnvironmentNow" class="button secondary wide" type="button">重新备份当前环境</button>
-                <small id="environmentConsistencyStatus" class="field-message" aria-live="polite">尚未执行环境对齐。</small>
-              </div>
-              <div class="binding-box">
-                <div>
-                  <strong>出口绑定</strong>
-                  <small id="bindingStatus">尚未绑定出口 IP。</small>
-                </div>
-                <div class="binding-actions">
-                  <button id="resetBinding" class="button secondary" type="button">重置绑定</button>
-                  <button id="rebindCurrentExit" class="button secondary" type="button">绑定当前出口</button>
-                </div>
-                <small id="bindingHelp" class="field-message" aria-live="polite">只保存出口 IP 指纹，不显示完整 IP。</small>
-              </div>
-              <button id="reopenSetup" class="button secondary wide" type="button">打开首次设置向导</button>
-              <label class="switch-row">
-                <span>
-                  <strong>开机自启</strong>
-                  <small>启动后恢复上次守卫状态</small>
-                </span>
-                <input id="launchAtLogin" type="checkbox" />
-              </label>
-              <div class="proxy-box">
-                <span class="eyebrow">本地代理</span>
-                <code id="proxy">127.0.0.1:18089</code>
-              </div>
-            </article>
-
-            <article class="panel glass-panel target-summary">
+            <article class="panel glass-panel overview-control-panel">
               <div class="panel-title compact">
                 <div>
-                  <span class="eyebrow">Targets</span>
-                  <h2>拦截配置</h2>
+                  <span class="eyebrow">Configuration</span>
+                  <h2>配置摘要</h2>
                 </div>
                 <strong id="targetCount" class="count-pill">0</strong>
               </div>
-              <div class="config-lines">
-                <div>
-                  <span>配置文件</span>
-                  <code id="targetConfigPath">--</code>
-                </div>
+              <div class="config-lines overview-config-lines">
                 <div>
                   <span>载入状态</span>
                   <strong id="configStatus">--</strong>
                 </div>
+                <div>
+                  <span>本地代理</span>
+                  <code id="proxy">127.0.0.1:18089</code>
+                </div>
+                <div>
+                  <span>配置文件</span>
+                  <code id="targetConfigPath">--</code>
+                </div>
+              </div>
+              <div class="overview-shortcuts">
+                <button class="button primary" type="button" data-open-view="settings">打开可选配置</button>
+                <button class="button secondary" type="button" data-open-view="targets">管理拦截规则</button>
               </div>
             </article>
           </aside>
@@ -188,166 +114,244 @@
       </section>
 
       <section id="view-targets" class="view" data-view-panel="targets" hidden>
-        <section class="content-grid targets-grid">
-          <article class="panel glass-panel target-panel">
-            <div class="panel-title">
-              <div>
-                <span class="eyebrow">Rules</span>
-                <h2>拦截目标</h2>
-              </div>
-              <button id="reloadRules" class="button secondary" type="button">重新载入配置</button>
-            </div>
-            <div id="configError" class="callout" hidden></div>
-            <div id="targetRules" class="target-list"></div>
-            <div class="button-row rule-editor-actions">
-              <button id="addTargetRule" class="button secondary" type="button">新增规则</button>
-              <button id="saveTargetRules" class="button primary" type="button">保存规则</button>
-            </div>
-            <small id="targetRulesStatus" class="field-message" aria-live="polite"></small>
-          </article>
-
-          <aside class="side-stack">
-            <article class="panel glass-panel validation-panel">
-              <div class="panel-title compact">
-                <div>
-                  <span class="eyebrow">Validation</span>
-                  <h2>接口校验范围</h2>
-                </div>
-              </div>
-              <p class="field-hint">选择要覆盖的服务范围，并单独开启需要参与检测和保护判断的校验项。</p>
-              <span class="field-label">服务范围</span>
-              <div class="validation-options">
-                <label class="toggle-row">
-                  <span>Claude / Anthropic</span>
-                  <input id="validationClaude" type="checkbox" checked />
-                </label>
-                <label class="toggle-row">
-                  <span>Codex / OpenAI</span>
-                  <input id="validationCodex" type="checkbox" checked />
-                </label>
-              </div>
-              <span class="field-label">校验项</span>
-              <div class="validation-options validation-check-options">
-                <label class="toggle-row">
-                  <span>静态住宅 IP</span>
-                  <input id="validationStaticResidentialIp" type="checkbox" checked />
-                </label>
-                <label class="toggle-row">
-                  <span>IP 类型</span>
-                  <input id="validationIpType" type="checkbox" checked />
-                </label>
-                <label class="toggle-row">
-                  <span>地区</span>
-                  <input id="validationRegion" type="checkbox" checked />
-                </label>
-                <label class="toggle-row">
-                  <span>代理风险</span>
-                  <input id="validationProxyRisk" type="checkbox" checked />
-                </label>
-                <label class="toggle-row">
-                  <span>DNS</span>
-                  <input id="validationDns" type="checkbox" checked />
-                </label>
-                <label class="toggle-row">
-                  <span>TCP</span>
-                  <input id="validationTcp" type="checkbox" checked />
-                </label>
-                <label class="toggle-row">
-                  <span>TLS</span>
-                  <input id="validationTls" type="checkbox" checked />
-                </label>
-                <label class="toggle-row">
-                  <span>强校验目标</span>
-                  <input id="validationControlHosts" type="checkbox" checked />
-                </label>
-                <label class="toggle-row">
-                  <span>Claude 网页探测</span>
-                  <input id="validationWebProbe" type="checkbox" checked />
-                </label>
-                <label class="toggle-row">
-                  <span>环境一致性</span>
-                  <input id="validationEnvironment" type="checkbox" checked />
-                </label>
-                <label class="toggle-row">
-                  <span>出口绑定</span>
-                  <input id="validationExitBinding" type="checkbox" checked />
-                </label>
-                <label class="toggle-row">
-                  <span>使用频率</span>
-                  <input id="validationUsageRate" type="checkbox" checked />
-                </label>
-              </div>
-              <label class="field-label" for="validationWebProbeUrl">网页探测 URL</label>
-              <input id="validationWebProbeUrl" class="text-input" type="url" value="https://claude.ai/" />
-              <label class="toggle-row custom-hosts-toggle">
-                <span>自定义主机列表</span>
-                <input id="validationCustomHosts" type="checkbox" />
-              </label>
-              <div id="validationCustomFields" class="validation-custom-fields" hidden>
-                <label class="field-label" for="validationHealthHosts">检测目标（每行一个主机）</label>
-                <textarea id="validationHealthHosts" class="text-input code-input" rows="4" spellcheck="false"></textarea>
-                <label class="field-label" for="validationControlHosts">强校验目标（每行一个主机，留空则与检测目标相同）</label>
-                <textarea id="validationControlHosts" class="text-input code-input" rows="3" spellcheck="false"></textarea>
-              </div>
-              <small id="validationStatus" class="field-message" aria-live="polite"></small>
-              <div class="button-row">
-                <button id="saveValidation" class="button primary" type="button">保存校验配置</button>
-                <button id="resetValidationDefaults" class="button secondary" type="button">还原校验默认</button>
-                <button id="resetTargetConfigDefaults" class="button secondary" type="button">还原全部默认</button>
-              </div>
-            </article>
-            <article class="panel glass-panel">
-              <div class="panel-title compact">
-                <div>
-                  <span class="eyebrow">Health</span>
-                  <h2>检测目标</h2>
-                </div>
-              </div>
-              <div id="healthHosts" class="chip-list"></div>
-            </article>
-            <article class="panel glass-panel">
-              <div class="panel-title compact">
-                <div>
-                  <span class="eyebrow">Control</span>
-                  <h2>强校验目标</h2>
-                </div>
-              </div>
-              <div id="controlHosts" class="chip-list"></div>
-            </article>
-            <article class="panel glass-panel">
-              <div class="panel-title compact">
-                <div>
-                  <span class="eyebrow">Firewall</span>
-                  <h2>防火墙目标</h2>
-                </div>
-              </div>
-              <div id="firewallHosts" class="chip-list"></div>
-            </article>
-          </aside>
-        </section>
-      </section>
-
-      <section id="view-activity" class="view" data-view-panel="activity" hidden>
-        <article class="panel glass-panel monitoring-panel">
+        <article class="panel glass-panel target-panel">
           <div class="panel-title">
             <div>
-              <span class="eyebrow">Monitoring</span>
-              <h2>周期监控</h2>
+              <span class="eyebrow">Rules</span>
+              <h2>Claude / Anthropic 拦截规则</h2>
             </div>
-            <button id="saveMonitoring" class="button primary" type="button">保存监控</button>
+            <button id="reloadRules" class="button secondary" type="button">重新载入配置</button>
           </div>
-          <div class="monitoring-controls">
-            <label class="toggle-row">
-              <span>后台定时检测</span>
-              <input id="monitoringEnabled" type="checkbox" />
+          <p class="field-hint rule-help">规则名称由系统自动维护。你只需填写 Claude 或 Anthropic 域名，并选择拦截或放行。</p>
+          <div id="configError" class="callout" hidden></div>
+          <div class="rule-table-head" aria-hidden="true">
+            <span>域名或 URL</span>
+            <span>动作</span>
+            <span>操作</span>
+          </div>
+          <div id="targetRules" class="target-list"></div>
+          <div class="button-row rule-editor-actions">
+            <button id="addTargetRule" class="button secondary" type="button">新增规则</button>
+            <button id="saveTargetRules" class="button primary" type="button">保存规则</button>
+          </div>
+          <small id="targetRulesStatus" class="field-message" aria-live="polite"></small>
+        </article>
+      </section>
+
+      <section id="view-settings" class="view" data-view-panel="settings" hidden>
+        <section class="settings-grid">
+          <article class="panel glass-panel validation-panel settings-card settings-card-wide">
+            <div class="panel-title compact">
+              <div>
+                <span class="eyebrow">Validation</span>
+                <h2>校验开关</h2>
+              </div>
+              <button id="saveValidation" class="button primary" type="button">保存校验配置</button>
+            </div>
+            <p class="field-hint">关闭不需要的校验项可以减少检测步骤，但也会降低保护强度。</p>
+            <div class="validation-options validation-check-options">
+              <label class="setting-switch">
+                <span><strong>Claude / Anthropic</strong><small>启用默认服务目标</small></span>
+                <input id="validationClaude" class="switch-input" type="checkbox" checked />
+              </label>
+              <label class="setting-switch">
+                <span><strong>静态住宅 IP</strong><small>核对固定出口</small></span>
+                <input id="validationStaticResidentialIp" class="switch-input" type="checkbox" checked />
+              </label>
+              <label class="setting-switch">
+                <span><strong>IP 类型</strong><small>识别住宅或机房网络</small></span>
+                <input id="validationIpType" class="switch-input" type="checkbox" checked />
+              </label>
+              <label class="setting-switch">
+                <span><strong>地区</strong><small>检查出口地区</small></span>
+                <input id="validationRegion" class="switch-input" type="checkbox" checked />
+              </label>
+              <label class="setting-switch">
+                <span><strong>代理风险</strong><small>检测 VPN、代理与 Tor</small></span>
+                <input id="validationProxyRisk" class="switch-input" type="checkbox" checked />
+              </label>
+              <label class="setting-switch">
+                <span><strong>DNS</strong><small>验证域名解析</small></span>
+                <input id="validationDns" class="switch-input" type="checkbox" checked />
+              </label>
+              <label class="setting-switch">
+                <span><strong>TCP</strong><small>验证 443 端口连接</small></span>
+                <input id="validationTcp" class="switch-input" type="checkbox" checked />
+              </label>
+              <label class="setting-switch">
+                <span><strong>TLS</strong><small>验证安全握手</small></span>
+                <input id="validationTls" class="switch-input" type="checkbox" checked />
+              </label>
+              <label class="setting-switch">
+                <span><strong>强校验目标</strong><small>要求核心目标全部通过</small></span>
+                <input id="validationControlHosts" class="switch-input" type="checkbox" checked />
+              </label>
+              <label class="setting-switch">
+                <span><strong>Claude 网页探测</strong><small>检查网页可达性</small></span>
+                <input id="validationWebProbe" class="switch-input" type="checkbox" checked />
+              </label>
+              <label class="setting-switch">
+                <span><strong>环境一致性</strong><small>检查时区、语言与 WebRTC</small></span>
+                <input id="validationEnvironment" class="switch-input" type="checkbox" checked />
+              </label>
+              <label class="setting-switch">
+                <span><strong>出口绑定</strong><small>识别出口变化</small></span>
+                <input id="validationExitBinding" class="switch-input" type="checkbox" checked />
+              </label>
+              <label class="setting-switch">
+                <span><strong>使用频率</strong><small>监控异常请求量</small></span>
+                <input id="validationUsageRate" class="switch-input" type="checkbox" checked />
+              </label>
+              <label class="setting-switch">
+                <span><strong>自定义主机列表</strong><small>覆盖默认检测目标</small></span>
+                <input id="validationCustomHosts" class="switch-input" type="checkbox" />
+              </label>
+            </div>
+            <div class="validation-fields-grid">
+              <label class="field compact">
+                <span>网页探测 URL</span>
+                <input id="validationWebProbeUrl" class="text-input" type="url" value="https://claude.ai/" />
+              </label>
+              <div id="validationCustomFields" class="validation-custom-fields" hidden>
+                <label class="field compact" for="validationHealthHosts">
+                  <span>检测目标（每行一个主机）</span>
+                  <textarea id="validationHealthHosts" class="text-input code-input" rows="4" spellcheck="false"></textarea>
+                </label>
+                <label class="field compact" for="validationCustomControlHosts">
+                  <span>强校验目标（留空则与检测目标相同）</span>
+                  <textarea id="validationCustomControlHosts" class="text-input code-input" rows="3" spellcheck="false"></textarea>
+                </label>
+              </div>
+            </div>
+            <small id="validationStatus" class="field-message" aria-live="polite"></small>
+            <div class="button-row secondary-actions">
+              <button id="resetValidationDefaults" class="button secondary" type="button">还原校验默认</button>
+              <button id="resetTargetConfigDefaults" class="button secondary" type="button">还原全部默认</button>
+            </div>
+          </article>
+
+          <article class="panel glass-panel settings-card">
+            <div class="panel-title compact">
+              <div>
+                <span class="eyebrow">Network</span>
+                <h2>网络与启动</h2>
+              </div>
+            </div>
+            <label class="field">
+              <span>静态住宅 IP</span>
+              <input id="staticResidentialIp" type="text" inputmode="decimal" autocomplete="off" placeholder="例如 203.0.113.10" />
+              <small id="staticIpHelp">填写 0.0.0.0 表示跳过静态 IP 校验。</small>
+            </label>
+            <button id="saveStaticIp" class="button secondary wide" type="button">保存静态 IP</button>
+            <label class="setting-switch">
+              <span><strong>开机自启</strong><small>启动后恢复上次守卫状态</small></span>
+              <input id="launchAtLogin" class="switch-input" type="checkbox" />
+            </label>
+            <button id="reopenSetup" class="button secondary wide" type="button">打开首次设置向导</button>
+          </article>
+
+          <article class="panel glass-panel settings-card">
+            <div class="panel-title compact">
+              <div>
+                <span class="eyebrow">Environment</span>
+                <h2>环境一致性</h2>
+              </div>
+              <small id="environmentConsistencySummary">尚未对齐环境</small>
+            </div>
+            <label class="setting-switch">
+              <span><strong>启用环境对齐</strong><small id="environmentConsistencyTarget">跟随出口 IP</small></span>
+              <input id="environmentConsistencyToggle" class="switch-input" type="checkbox" />
+            </label>
+            <label class="setting-switch">
+              <span><strong>自动选择目标</strong><small>根据出口 IP 选择时区和语言</small></span>
+              <input id="deriveFromExitIp" class="switch-input" type="checkbox" checked />
+            </label>
+            <label class="setting-switch">
+              <span><strong>保留中文输入法</strong><small>推荐开启</small></span>
+              <input id="keepChineseInput" class="switch-input" type="checkbox" checked />
+            </label>
+            <div class="form-grid">
+              <label class="field compact">
+                <span>目标时区 (IANA)</span>
+                <input id="profileOverrideTimeZone" type="text" placeholder="留空=自动" autocomplete="off" />
+              </label>
+              <label class="field compact">
+                <span>目标语言</span>
+                <input id="profileOverrideLanguage" type="text" placeholder="留空=自动" autocomplete="off" />
+              </label>
+            </div>
+            <div class="button-row settings-actions">
+              <button id="applyEnvironmentConsistency" class="button primary" type="button">一键对齐环境</button>
+              <button id="restoreEnvironmentConsistency" class="button secondary" type="button">还原环境</button>
+              <button id="backupEnvironmentNow" class="button secondary" type="button">重新备份</button>
+            </div>
+            <small id="environmentConsistencyStatus" class="field-message" aria-live="polite">尚未执行环境对齐。</small>
+          </article>
+
+          <article class="panel glass-panel settings-card">
+            <div class="panel-title compact">
+              <div>
+                <span class="eyebrow">Binding</span>
+                <h2>出口绑定与恢复</h2>
+              </div>
+            </div>
+            <div class="binding-box settings-subpanel">
+              <div>
+                <strong>出口绑定</strong>
+                <small id="bindingStatus">尚未绑定出口 IP。</small>
+              </div>
+              <div class="binding-actions">
+                <button id="resetBinding" class="button secondary" type="button">重置绑定</button>
+                <button id="rebindCurrentExit" class="button secondary" type="button">绑定当前出口</button>
+              </div>
+              <small id="bindingHelp" class="field-message" aria-live="polite">只保存出口 IP 指纹，不显示完整 IP。</small>
+            </div>
+            <div class="restore-box settings-subpanel">
+              <div>
+                <strong>网络恢复</strong>
+                <small>关闭守卫，并清理本应用写入的代理、防火墙和 hosts 设置。</small>
+              </div>
+              <button id="emergencyRestore" class="button danger wide" type="button">恢复网络</button>
+              <small id="recoveryStatus" class="field-message" aria-live="polite">尚未执行恢复。</small>
+            </div>
+          </article>
+
+          <article class="panel glass-panel settings-card">
+            <div class="panel-title compact">
+              <div>
+                <span class="eyebrow">Monitoring</span>
+                <h2>周期监控</h2>
+              </div>
+              <button id="saveMonitoring" class="button primary" type="button">保存监控</button>
+            </div>
+            <label class="setting-switch">
+              <span><strong>后台定时检测</strong><small>按设定间隔自动运行检查</small></span>
+              <input id="monitoringEnabled" class="switch-input" type="checkbox" />
             </label>
             <label class="field compact" for="monitoringInterval">
               <span>间隔（分钟）</span>
               <input id="monitoringInterval" class="text-input" type="number" min="1" max="1440" step="1" value="15" />
             </label>
-          </div>
-          <small id="monitoringStatus" class="field-message" aria-live="polite">尚未启用周期监控。</small>
-        </article>
+            <small id="monitoringStatus" class="field-message" aria-live="polite">尚未启用周期监控。</small>
+          </article>
+
+          <article class="panel glass-panel settings-card settings-card-wide">
+            <div class="panel-title compact">
+              <div>
+                <span class="eyebrow">Targets</span>
+                <h2>当前生效目标</h2>
+              </div>
+            </div>
+            <div class="target-chip-grid">
+              <div><strong>检测目标</strong><div id="healthHosts" class="chip-list"></div></div>
+              <div><strong>强校验目标</strong><div id="controlHosts" class="chip-list"></div></div>
+              <div><strong>防火墙目标</strong><div id="firewallHosts" class="chip-list"></div></div>
+            </div>
+          </article>
+        </section>
+      </section>
+
+      <section id="view-activity" class="view" data-view-panel="activity" hidden>
         <article class="panel glass-panel">
           <div class="panel-title">
             <div>
@@ -404,7 +408,7 @@
             <h2 id="setupWizardTitle">首次设置向导</h2>
           </div>
         </div>
-        <p>CloudNetworkGuard 会保护 Claude、Codex、ChatGPT、OpenAI API 和 Anthropic API 目标流量。开启后可能修改系统代理、防火墙和 hosts 中由本应用标记的内容。</p>
+        <p>Claude Network Guard 会保护 Claude 与 Anthropic API 目标流量。开启后可能修改系统代理、防火墙和 hosts 中由本应用标记的内容。</p>
         <div class="setup-choice">
           <label><input name="setupStaticIpStrategy" type="radio" value="manual" checked /> 我会手动配置静态住宅 IP</label>
           <label><input name="setupStaticIpStrategy" type="radio" value="skip" /> 明确跳过静态 IP 校验</label>

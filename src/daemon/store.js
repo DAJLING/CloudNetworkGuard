@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { GuardState } = require('../shared/constants');
 
-function defaultDataDir(appName = 'claude-codex-network-guard') {
+function defaultDataDir(appName = 'claude-network-guard') {
   if (process.env.NETWORK_GUARD_DATA_DIR) return process.env.NETWORK_GUARD_DATA_DIR;
   if (process.platform === 'win32') {
     return path.join(process.env.APPDATA || os.homedir(), appName);

@@ -11,7 +11,7 @@ async function probeClaudeWeb(fetchImpl = fetch, url = 'https://claude.ai/') {
       method: 'GET',
       redirect: 'manual',
       headers: {
-        'user-agent': 'Mozilla/5.0 ClaudeCodexNetworkGuard/0.1',
+        'user-agent': 'Mozilla/5.0 ClaudeNetworkGuard/0.1',
         accept: 'text/html,application/xhtml+xml'
       }
     });

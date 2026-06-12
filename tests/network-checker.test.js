@@ -60,7 +60,7 @@ test('NetworkChecker runs and reports only enabled validation items', async () =
     },
     getTargetConfig: () => ({
       validation: {
-        services: { claude: false, codex: false },
+        services: { claude: false },
         checks: {
           staticResidentialIp: false,
           ipType: false,

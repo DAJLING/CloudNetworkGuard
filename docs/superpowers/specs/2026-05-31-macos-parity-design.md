@@ -225,10 +225,10 @@ When the guard is enabled and validation has not released traffic, macOS should 
 
 Use an app-owned anchor:
 
-- Anchor name: `com.local.claude-codex-network-guard`
-- Anchor path: `/etc/pf.anchors/com.local.claude-codex-network-guard`
-- `pf.conf` marker start: `# ClaudeCodexNetworkGuard START`
-- `pf.conf` marker end: `# ClaudeCodexNetworkGuard END`
+- Anchor name: `com.local.claude-network-guard`
+- Anchor path: `/etc/pf.anchors/com.local.claude-network-guard`
+- `pf.conf` marker start: `# ClaudeNetworkGuard START`
+- `pf.conf` marker end: `# ClaudeNetworkGuard END`
 
 The manager should only add or remove the marked block in `/etc/pf.conf`; all other user content must remain untouched.
 

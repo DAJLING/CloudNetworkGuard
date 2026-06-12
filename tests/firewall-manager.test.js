@@ -17,21 +17,20 @@ async function withFirewallEnabled(fn) {
 }
 
 test('firewall rule prefix is scoped to this app', () => {
-  assert.equal(FIREWALL_RULE_PREFIX, 'ClaudeCodexNetworkGuard');
+  assert.equal(FIREWALL_RULE_PREFIX, 'ClaudeNetworkGuard');
 });
 
-test('firewall target hosts include Claude and Codex/OpenAI endpoints', () => {
+test('firewall target hosts include only Claude and Anthropic endpoints', () => {
   assert.equal(FIREWALL_TARGET_HOSTS.includes('claude.ai'), true);
   assert.equal(FIREWALL_TARGET_HOSTS.includes('api.anthropic.com'), true);
-  assert.equal(FIREWALL_TARGET_HOSTS.includes('api.openai.com'), true);
-  assert.equal(FIREWALL_TARGET_HOSTS.includes('chatgpt.com'), true);
+  assert.deepEqual(FIREWALL_TARGET_HOSTS, ['claude.ai', 'api.anthropic.com', 'anthropic.com']);
 });
 
 test('hosts block renderer includes stable markers and target domains', () => {
-  const manager = new FirewallManager({ hosts: ['api.openai.com'] });
+  const manager = new FirewallManager({ hosts: ['api.anthropic.com'] });
   const block = manager.renderHostsBlock();
   assert.equal(block.includes(HOSTS_BLOCK_START), true);
-  assert.equal(block.includes('0.0.0.0 api.openai.com'), true);
+  assert.equal(block.includes('0.0.0.0 api.anthropic.com'), true);
   assert.equal(block.includes(HOSTS_BLOCK_END), true);
   assert.equal(manager.removeHostsBlock(`before\n${block}\nafter`), 'before\nafter');
 });
@@ -46,7 +45,7 @@ test('renderPfBlockRule renders IPv4 and IPv6 target set', () => {
 
 test('renderPfBlockRule rejects invalid IP literals', () => {
   const { renderPfBlockRule } = require('../src/daemon/firewall-manager');
-  for (const value of ['api.openai.com', '::::', 'abc:def', '1:2:3:4:5:6:7:8:9']) {
+  for (const value of ['api.anthropic.com', '::::', 'abc:def', '1:2:3:4:5:6:7:8:9']) {
     assert.throws(() => renderPfBlockRule([value]), /INVALID_PF_IP/);
   }
 });
@@ -65,11 +64,11 @@ test('ensurePfAnchorBlock adds one marked anchor block', () => {
   const once = ensurePfAnchorBlock('set skip on lo0\n');
   const twice = ensurePfAnchorBlock(once);
 
-  assert.equal(PF_CONF_BLOCK_START, '# ClaudeCodexNetworkGuard PF START');
-  assert.equal(PF_CONF_BLOCK_END, '# ClaudeCodexNetworkGuard PF END');
+  assert.equal(PF_CONF_BLOCK_START, '# ClaudeNetworkGuard PF START');
+  assert.equal(PF_CONF_BLOCK_END, '# ClaudeNetworkGuard PF END');
   assert.match(once, new RegExp(PF_CONF_BLOCK_START));
-  assert.match(once, /anchor "com\.local\.claude-codex-network-guard"/);
-  assert.match(once, /load anchor "com\.local\.claude-codex-network-guard"/);
+  assert.match(once, /anchor "com\.local\.claude-network-guard"/);
+  assert.match(once, /load anchor "com\.local\.claude-network-guard"/);
   assert.match(once, new RegExp(PF_CONF_BLOCK_END));
   assert.equal(twice, once);
 });
@@ -85,9 +84,9 @@ test('removePfAnchorBlock preserves marker text outside whole marker lines', () 
   const { removePfAnchorBlock } = require('../src/daemon/firewall-manager');
   const content = [
     'set skip on lo0',
-    'pass out all # ClaudeCodexNetworkGuard PF START',
+    'pass out all # ClaudeNetworkGuard PF START',
     'anchor "other"',
-    '# ClaudeCodexNetworkGuard PF END is mentioned here'
+    '# ClaudeNetworkGuard PF END is mentioned here'
   ].join('\n');
 
   assert.equal(removePfAnchorBlock(content), content);
@@ -97,10 +96,10 @@ test('removePfAnchorBlock removes marked CRLF anchor block', () => {
   const { removePfAnchorBlock } = require('../src/daemon/firewall-manager');
   const content = [
     'set skip on lo0',
-    '# ClaudeCodexNetworkGuard PF START',
-    'anchor "com.local.claude-codex-network-guard"',
-    'load anchor "com.local.claude-codex-network-guard" from "/etc/pf.anchors/com.local.claude-codex-network-guard"',
-    '# ClaudeCodexNetworkGuard PF END',
+    '# ClaudeNetworkGuard PF START',
+    'anchor "com.local.claude-network-guard"',
+    'load anchor "com.local.claude-network-guard" from "/etc/pf.anchors/com.local.claude-network-guard"',
+    '# ClaudeNetworkGuard PF END',
     'pass out all'
   ].join('\r\n');
 
@@ -118,7 +117,7 @@ test('applyMacBlock writes anchor, patches pf.conf, and loads pf', async () => {
     const privilegedWrites = [];
     const privilegedCommands = [];
     const manager = new TestFirewallManager({
-      hosts: ['api.openai.com'],
+      hosts: ['api.anthropic.com'],
       platform: 'darwin',
       pfConfPath,
       pfAnchorPath,
@@ -131,7 +130,7 @@ test('applyMacBlock writes anchor, patches pf.conf, and loads pf', async () => {
       },
       resolveTargetIpsImpl: async () => ({
         ips: ['203.0.113.10'],
-        results: [{ host: 'api.openai.com', ips: ['203.0.113.10'], errors: [] }]
+        results: [{ host: 'api.anthropic.com', ips: ['203.0.113.10'], errors: [] }]
       }),
       macRunner: {
         writeFilePrivileged: async (filePath, content) => {
@@ -155,7 +154,7 @@ test('applyMacBlock writes anchor, patches pf.conf, and loads pf', async () => {
     assert.equal(privilegedWrites[0].filePath, pfAnchorPath);
     assert.match(privilegedWrites[0].content, /block drop out quick to \{ 203\.0\.113\.10 \}/);
     assert.equal(privilegedWrites[1].filePath, pfConfPath);
-    assert.match(privilegedWrites[1].content, new RegExp(`load anchor "com\\.local\\.claude-codex-network-guard" from "${pfAnchorPath}"`));
+    assert.match(privilegedWrites[1].content, new RegExp(`load anchor "com\\.local\\.claude-network-guard" from "${pfAnchorPath}"`));
     assert.deepEqual(privilegedCommands[0], [
       ['pfctl', '-nf', pfConfPath],
       ['pfctl', '-f', pfConfPath],
@@ -173,10 +172,10 @@ test('clearMacBlock removes anchor block and reloads pf.conf', async () => {
     const files = {
       '/etc/pf.conf': [
         'set skip on lo0',
-        '# ClaudeCodexNetworkGuard PF START',
-        'anchor "com.local.claude-codex-network-guard"',
-        'load anchor "com.local.claude-codex-network-guard" from "/etc/pf.anchors/com.local.claude-codex-network-guard"',
-        '# ClaudeCodexNetworkGuard PF END',
+        '# ClaudeNetworkGuard PF START',
+        'anchor "com.local.claude-network-guard"',
+        'load anchor "com.local.claude-network-guard" from "/etc/pf.anchors/com.local.claude-network-guard"',
+        '# ClaudeNetworkGuard PF END',
         ''
       ].join('\n'),
       [PF_ANCHOR_PATH]: 'block drop out quick to { 203.0.113.10 }\n'
@@ -209,7 +208,7 @@ test('clearMacBlock removes anchor block and reloads pf.conf', async () => {
 
     assert.equal(result.mode, 'PF_CLEARED');
     assert.equal(result.rules.length, 0);
-    assert.doesNotMatch(files['/etc/pf.conf'], /ClaudeCodexNetworkGuard PF START/);
+    assert.doesNotMatch(files['/etc/pf.conf'], /ClaudeNetworkGuard PF START/);
     assert.equal(files[PF_ANCHOR_PATH], undefined);
     assert.deepEqual(commands[0], [
       ['pfctl', '-nf', '/etc/pf.conf'],
@@ -222,7 +221,7 @@ test('applyMacBlock returns partial result when authorization fails', async () =
   await withFirewallEnabled(async () => {
     const { FirewallManager: TestFirewallManager } = require('../src/daemon/firewall-manager');
     const manager = new TestFirewallManager({
-      hosts: ['api.openai.com'],
+      hosts: ['api.anthropic.com'],
       platform: 'darwin',
       resolveTargetIpsImpl: async () => ({ ips: ['203.0.113.10'], results: [] }),
       macRunner: {

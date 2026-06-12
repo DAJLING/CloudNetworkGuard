@@ -13,7 +13,7 @@ async function fetchJson(url, timeoutMs = 5000) {
     const response = await fetch(url, {
       signal: timeout.signal,
       headers: {
-        'user-agent': 'ClaudeCodexNetworkGuard/0.1'
+        'user-agent': 'ClaudeNetworkGuard/0.1'
       }
     });
     if (!response.ok) throw new Error(`HTTP_${response.status}`);

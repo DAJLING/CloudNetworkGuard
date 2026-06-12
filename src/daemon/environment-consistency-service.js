@@ -74,22 +74,24 @@ class EnvironmentConsistencyService {
       };
     }
 
-    const running = await this.applier.isBrowserRunning();
-    if (running.length) {
-      return {
-        ok: false,
-        restartRequired: false,
-        steps: {
-          preflight: { ok: false, error: 'BROWSER_RUNNING', running }
-        },
-        lastTargetProfile: this.buildTargetProfile({ exitIp, config }),
-        backup: this.backupStore.getSummary()
-      };
+    const keepChineseInput = config.keepChineseInput !== false;
+    if (this.platform !== 'win32' || !keepChineseInput) {
+      const running = await this.applier.isBrowserRunning();
+      if (running.length) {
+        return {
+          ok: false,
+          restartRequired: false,
+          steps: {
+            preflight: { ok: false, error: 'BROWSER_RUNNING', running }
+          },
+          lastTargetProfile: this.buildTargetProfile({ exitIp, config }),
+          backup: this.backupStore.getSummary()
+        };
+      }
     }
 
     const targetProfile = this.buildTargetProfile({ exitIp, config });
     await this.ensureBackup();
-    const keepChineseInput = config.keepChineseInput !== false;
     const applyResult = await this.applier.applyProfile(targetProfile, { keepChineseInput });
 
     return {

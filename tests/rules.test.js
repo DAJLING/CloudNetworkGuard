@@ -9,11 +9,9 @@ test('domainMatches supports exact and wildcard target domains', () => {
   assert.equal(domainMatches('*.claude.ai', 'notclaude.ai'), false);
 });
 
-test('isGuardedTarget guards Claude, ChatGPT, OpenAI, and Anthropic domains', () => {
+test('isGuardedTarget guards only Claude and Anthropic domains by default', () => {
   assert.equal(isGuardedTarget('api.anthropic.com'), true);
   assert.equal(isGuardedTarget('claude.ai'), true);
-  assert.equal(isGuardedTarget('chatgpt.com'), true);
-  assert.equal(isGuardedTarget('api.openai.com'), true);
   assert.equal(isGuardedTarget('example.com'), false);
 });
 

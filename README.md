@@ -1,11 +1,11 @@
-# Claude Codex Network Guard
+# Claude Network Guard
 
-Windows/macOS desktop guard for Claude, Codex, ChatGPT, OpenAI API, and Anthropic API traffic.
+Windows/macOS desktop guard for Claude and Anthropic API traffic.
 
 The app provides a one-click guard switch. When enabled, target traffic is routed through a local proxy and is blocked unless the current network passes these checks:
 
-- External access to Claude/OpenAI/Anthropic targets
-- DNS, TCP:443, and TLS checks for Claude/OpenAI/Anthropic targets
+- External access to Claude/Anthropic targets
+- DNS, TCP:443, and TLS checks for Claude/Anthropic targets
 - Claude web reachability probe for `https://claude.ai/`
 - Free-source IP classification and proxy/VPN/datacenter risk checks
 - Mainland China, Hong Kong, Macau, and unknown-region blocking
@@ -18,9 +18,9 @@ The app provides a one-click guard switch. When enabled, target traffic is route
 
 ## Target Configuration
 
-Guarded Claude/Codex targets are loaded from an editable JSON file named `target-rules.json` in the app data directory. Set `NETWORK_GUARD_TARGET_CONFIG` to point at another file. The Targets view can add, edit, delete, and save target rules without manually editing JSON.
+Guarded Claude targets are loaded from an editable JSON file named `target-rules.json` in the app data directory. Set `NETWORK_GUARD_TARGET_CONFIG` to point at another file. The Targets view can add, edit, delete, and save Claude/Anthropic target rules without manually editing JSON.
 
-On first run the app writes the default Claude, Anthropic, OpenAI, and ChatGPT rules. Edit the `rules` array to add or remove guarded domains or full URLs, then use "重新载入配置" in the app.
+On first run the app writes the default Claude and Anthropic rules. Rules, custom validation hosts, and the web probe URL are restricted to `claude.ai` and `anthropic.com` domains.
 
 `staticResidentialIp` may be edited in the app or in this file. Leave it empty to require setup before enabling the guard, set it to a real static residential IPv4 address to compare against the current exit IP, or set it to `0.0.0.0` to skip only the static IP check.
 
@@ -29,11 +29,11 @@ On first run the app writes the default Claude, Anthropic, OpenAI, and ChatGPT r
   "version": 1,
   "rules": [
     { "id": "claude-web", "domainPattern": "claude.ai", "action": "GUARD" },
-    { "id": "codex-openai-api", "domainPattern": "https://api.openai.com/v1", "action": "GUARD" }
+    { "id": "anthropic-api", "domainPattern": "*.anthropic.com", "action": "GUARD" }
   ],
-  "healthCheckHosts": ["claude.ai", "api.openai.com"],
-  "controlHosts": ["claude.ai"],
-  "firewallHosts": ["claude.ai", "api.openai.com"],
+  "healthCheckHosts": ["claude.ai", "api.anthropic.com"],
+  "controlHosts": ["claude.ai", "api.anthropic.com"],
+  "firewallHosts": ["claude.ai", "anthropic.com"],
   "webProbeUrl": "https://claude.ai/",
   "staticResidentialIp": ""
 }
@@ -68,9 +68,9 @@ npm.cmd run dist:msi
 ## Platform Notes
 
 - Windows proxy settings are applied through the current user's Internet Settings registry keys.
-- Windows firewall fallback uses `netsh advfirewall` outbound block rules for resolved Claude/OpenAI/ChatGPT IPs. It may require elevated permissions.
+- Windows firewall fallback uses `netsh advfirewall` outbound block rules for resolved Claude/Anthropic IPs. It may require elevated permissions.
 - macOS proxy settings use `networksetup` and default to the `Wi-Fi` service. Set `NETWORK_GUARD_MAC_SERVICE` to target another network service.
-- macOS firewall fallback uses an app-owned `pf` anchor at `/etc/pf.anchors/com.local.claude-codex-network-guard` and may request administrator authorization. The app only manages its marked `pf.conf` block and its own anchor file.
+- macOS firewall fallback uses an app-owned `pf` anchor at `/etc/pf.anchors/com.local.claude-network-guard` and may request administrator authorization. The app only manages its marked `pf.conf` block and its own anchor file.
 - Set `NETWORK_GUARD_SKIP_SYSTEM_PROXY=1` for tests or dry runs that should not touch system proxy settings.
 - Set `NETWORK_GUARD_SKIP_FIREWALL=1` for tests or dry runs that should not touch firewall settings.
 

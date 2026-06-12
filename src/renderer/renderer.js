@@ -43,7 +43,6 @@ const els = {
   controlHosts: document.querySelector('#controlHosts'),
   firewallHosts: document.querySelector('#firewallHosts'),
   validationClaude: document.querySelector('#validationClaude'),
-  validationCodex: document.querySelector('#validationCodex'),
   validationStaticResidentialIp: document.querySelector('#validationStaticResidentialIp'),
   validationIpType: document.querySelector('#validationIpType'),
   validationRegion: document.querySelector('#validationRegion'),
@@ -60,7 +59,7 @@ const els = {
   validationCustomHosts: document.querySelector('#validationCustomHosts'),
   validationCustomFields: document.querySelector('#validationCustomFields'),
   validationHealthHosts: document.querySelector('#validationHealthHosts'),
-  validationControlHosts: document.querySelector('#validationControlHosts'),
+  validationCustomControlHosts: document.querySelector('#validationCustomControlHosts'),
   validationStatus: document.querySelector('#validationStatus'),
   saveValidation: document.querySelector('#saveValidation'),
   resetValidationDefaults: document.querySelector('#resetValidationDefaults'),
@@ -159,6 +158,50 @@ const reasonLabels = {
   FIREWALL_ERROR: '防火墙兜底失败'
 };
 
+const userErrorMessages = {
+  BROWSER_RUNNING: '请先完全关闭 Chrome / Edge 后重试。',
+  BACKUP_NOT_FOUND: '还没有可还原的环境备份，请先执行一次环境对齐或重新备份。',
+  UNSUPPORTED_PLATFORM: '当前平台暂不支持此操作。',
+  TIMEZONE_EMPTY: '目标时区为空，请填写目标时区或恢复自动选择。',
+  BACKUP_LANGUAGE_EMPTY: '备份中的语言列表为空，无法还原语言设置。',
+  COMMAND_TIMEOUT: '系统命令执行超时，请稍后重试。',
+  PREFERENCES_NOT_FOUND: '未找到浏览器偏好设置文件，可能尚未启动过该浏览器。',
+  NOT_INSTALLED: '未安装对应浏览器，已跳过。',
+  PROXY_RESTORE_FAILED: '代理设置恢复失败，请尝试再次恢复网络。',
+  FIREWALL_RESTORE_FAILED: '防火墙规则清理失败，请以管理员身份运行后重试。',
+  FIREWALL_CLEAR_FAILED: '防火墙规则清理失败，请以管理员身份运行后重试。',
+  FIREWALL_ERROR: '防火墙兜底失败，请以管理员身份运行后重试。',
+  MONITORING_INTERVAL_INVALID: '监控间隔需在 1 到 1440 分钟之间。',
+  MONITORING_FAILED: '周期监控执行失败，请稍后重试。',
+  STATIC_RESIDENTIAL_IP_REQUIRED: '请填写静态住宅 IP，或选择不校验。',
+  INVALID_STATIC_RESIDENTIAL_IP: '静态住宅 IP 无效，请重新填写 IPv4 地址。',
+  VALIDATION_SERVICE_REQUIRED: '请启用 Claude / Anthropic 校验，或使用自定义 Claude 主机。',
+  VALIDATION_CUSTOM_HOSTS_REQUIRED: '自定义模式下请填写至少一个检测目标主机。',
+  VALIDATION_CONFIG_INVALID: '校验配置无效，已回退默认配置。',
+  TARGET_CONFIG_LOAD_FAILED: '配置文件读取失败，请检查 JSON 格式或恢复默认配置。',
+  CLAUDE_TARGET_REQUIRED: '只能添加 claude.ai 或 anthropic.com 及其子域名。',
+  TARGET_RULES_REQUIRED: '请至少保留一条目标规则。',
+  TARGET_RULE_IDS_DUPLICATE: '目标规则 ID 重复，请删除重复规则后保存。',
+  PROVIDER_UNAVAILABLE: '检测源暂不可用，请稍后重试。',
+  INTERNAL_ERROR: '内部服务异常，请稍后重试或查看日志。'
+};
+
+const stepLabels = {
+  preflight: '前置检查',
+  platform: '平台检查',
+  backup: '环境备份',
+  proxy: '代理恢复',
+  firewall: '防火墙恢复',
+  'windows.timezone': 'Windows 时区',
+  'windows.language': 'Windows 语言',
+  'mac.timezone': 'macOS 时区',
+  'mac.language': 'macOS 语言',
+  'chrome.language': 'Chrome 语言',
+  'chrome.webrtc': 'Chrome WebRTC',
+  'edge.language': 'Edge 语言',
+  'edge.webrtc': 'Edge WebRTC'
+};
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -170,6 +213,24 @@ function escapeHtml(value) {
 
 function labelVerdict(verdict) {
   return verdictLabels[verdict] || verdict || '--';
+}
+
+function isInternalErrorCode(value) {
+  return /^[A-Z0-9_]+$/.test(String(value || ''));
+}
+
+function formatUserError(value, fallback = '操作失败，请稍后重试。') {
+  const message = value && value.message ? value.message : value;
+  const normalized = String(message || '').trim();
+  if (!normalized) return fallback;
+  if (userErrorMessages[normalized]) return userErrorMessages[normalized];
+  return isInternalErrorCode(normalized) ? fallback : normalized;
+}
+
+function formatStepFailures(steps = {}, fallback = '操作失败，请稍后重试。') {
+  return Object.entries(steps)
+    .filter(([, step]) => step && step.ok === false)
+    .map(([name, step]) => `${stepLabels[name] || name}：${formatUserError(step.error, fallback)}`);
 }
 
 function formatDate(value) {
@@ -355,7 +416,9 @@ function renderTargets(config = {}) {
 
   if (config.error || config.staticResidentialIpError) {
     els.configError.hidden = false;
-    els.configError.textContent = config.error ? `配置读取失败：${config.error}` : '静态住宅 IP 配置无效，请在总览页重新保存。';
+    els.configError.textContent = config.error
+      ? `配置读取失败：${formatUserError(config.error, '配置文件无法读取，请检查 JSON 格式或恢复默认配置。')}`
+      : formatUserError(config.staticResidentialIpError, '静态住宅 IP 配置无效，请在总览页重新保存。');
   } else {
     els.configError.hidden = true;
     els.configError.textContent = '';
@@ -378,12 +441,11 @@ function renderTargetRuleEditor(rules = []) {
 
   els.targetRules.innerHTML = rules
     .map((rule, index) => `
-      <div class="target-row editable" data-rule-index="${index}">
-        <input class="text-input rule-id-input" type="text" value="${escapeHtml(rule.id)}" aria-label="规则 ID" />
+      <div class="target-row editable" data-rule-index="${index}" data-rule-id="${escapeHtml(rule.id)}">
         <input class="text-input rule-domain-input" type="text" value="${escapeHtml(rule.domainPattern)}" aria-label="规则域名" />
         <select class="text-input rule-action-input" aria-label="规则动作">
-          <option value="GUARD"${rule.action === 'GUARD' ? ' selected' : ''}>GUARD</option>
-          <option value="ALLOW"${rule.action === 'ALLOW' ? ' selected' : ''}>ALLOW</option>
+          <option value="GUARD"${rule.action === 'GUARD' ? ' selected' : ''}>拦截</option>
+          <option value="ALLOW"${rule.action === 'ALLOW' ? ' selected' : ''}>放行</option>
         </select>
         <button class="button secondary remove-rule" type="button" data-remove-rule="${index}">删除</button>
       </div>
@@ -394,11 +456,10 @@ function renderTargetRuleEditor(rules = []) {
 function readTargetRulesFromEditor({ validate = true } = {}) {
   const rows = Array.from(els.targetRules ? els.targetRules.querySelectorAll('.target-row.editable') : []);
   const rules = rows.map((row, index) => {
-    const idInput = row.querySelector('.rule-id-input');
     const domainInput = row.querySelector('.rule-domain-input');
     const actionInput = row.querySelector('.rule-action-input');
     return {
-      id: String((idInput && idInput.value) || `target-${index + 1}`).trim() || `target-${index + 1}`,
+      id: String(row.dataset.ruleId || `target-${index + 1}`).trim() || `target-${index + 1}`,
       domainPattern: String((domainInput && domainInput.value) || '').trim(),
       action: actionInput && actionInput.value === 'ALLOW' ? 'ALLOW' : 'GUARD'
     };
@@ -407,11 +468,8 @@ function readTargetRulesFromEditor({ validate = true } = {}) {
   if (!validate) return rules;
   if (!rules.length) throw new Error('请至少保留一条目标规则。');
 
-  const ids = new Set();
   for (const rule of rules) {
     if (!rule.domainPattern) throw new Error('请填写每条规则的域名或 URL。');
-    if (ids.has(rule.id)) throw new Error('规则 ID 不能重复。');
-    ids.add(rule.id);
   }
   return rules;
 }
@@ -505,7 +563,6 @@ function renderValidationEditor(validation = {}, config = {}) {
 
   const services = validation.services || {};
   els.validationClaude.checked = services.claude !== false;
-  els.validationCodex.checked = services.codex !== false;
 
   const checks = normalizeValidationChecks(validation.checks || {});
   for (const [checkId, getElement] of Object.entries(validationCheckElements)) {
@@ -523,24 +580,21 @@ function renderValidationEditor(validation = {}, config = {}) {
       ? validation.customHealthCheckHosts
       : config.healthCheckHosts
   );
-  els.validationControlHosts.value = hostsToTextarea(
+  els.validationCustomControlHosts.value = hostsToTextarea(
     validation.customControlHosts && validation.customControlHosts.length
       ? validation.customControlHosts
       : config.controlHosts
   );
 
   if (config.validationError) {
-    els.validationStatus.textContent = `校验配置无效，已回退默认：${config.validationError}`;
+    els.validationStatus.textContent = `校验配置无效，已回退默认：${formatUserError(config.validationError)}`;
     els.validationStatus.className = 'field-message error';
   } else if (!hasEnabledValidationChecks(validation)) {
     els.validationStatus.textContent = '当前没有开启的校验项，立即检测和开启守卫已禁用。';
     els.validationStatus.className = 'field-message';
   } else {
     const enabledCount = countEnabledValidationChecks(validation);
-    const serviceLabel = [
-      services.claude !== false ? 'Claude' : '',
-      services.codex !== false ? 'Codex' : ''
-    ].filter(Boolean).join(' + ') || '未选择目标服务';
+    const serviceLabel = services.claude !== false ? 'Claude / Anthropic' : '未选择目标服务';
     els.validationStatus.textContent = validation.useCustomHosts
       ? `当前使用自定义主机列表，已开启 ${enabledCount} 项校验。`
       : `当前预设：${serviceLabel}，已开启 ${enabledCount} 项校验。`;
@@ -552,22 +606,23 @@ function renderValidationEditor(validation = {}, config = {}) {
 
 function readValidationInputFromForm() {
   const claude = Boolean(els.validationClaude && els.validationClaude.checked);
-  const codex = Boolean(els.validationCodex && els.validationCodex.checked);
   const checks = readValidationChecksFromForm();
   const targetChecksEnabled = hasTargetValidationChecks(checks);
-  if (targetChecksEnabled && !claude && !codex && !(els.validationCustomHosts && els.validationCustomHosts.checked)) {
-    throw new Error('请至少启用 Claude 或 Codex/OpenAI 其中一项校验。');
+  if (targetChecksEnabled && !claude && !(els.validationCustomHosts && els.validationCustomHosts.checked)) {
+    throw new Error('请启用 Claude / Anthropic 校验，或使用自定义 Claude 主机。');
   }
 
   const useCustomHosts = Boolean(els.validationCustomHosts && els.validationCustomHosts.checked);
   const customHealthCheckHosts = parseHostLines(els.validationHealthHosts && els.validationHealthHosts.value);
-  const customControlHosts = parseHostLines(els.validationControlHosts && els.validationControlHosts.value);
+  const customControlHosts = parseHostLines(
+    els.validationCustomControlHosts && els.validationCustomControlHosts.value
+  );
   if (targetChecksEnabled && useCustomHosts && !customHealthCheckHosts.length) {
     throw new Error('自定义模式下请填写至少一个检测目标主机。');
   }
 
   return {
-    services: { claude, codex },
+    services: { claude },
     checks,
     webProbe: {
       enabled: Boolean(els.validationWebProbe && els.validationWebProbe.checked),
@@ -639,7 +694,7 @@ function renderMonitoring(monitoring = {}) {
   if (monitoring.running) parts.push('正在检测');
   if (monitoring.lastRunAt) parts.push(`上次运行 ${formatDate(monitoring.lastRunAt)}`);
   if (monitoring.lastResult && monitoring.lastResult.verdict) parts.push(`结果 ${labelVerdict(monitoring.lastResult.verdict)}`);
-  if (monitoring.lastError) parts.push(`错误 ${monitoring.lastError}`);
+  if (monitoring.lastError) parts.push(`错误 ${formatUserError(monitoring.lastError, '周期监控执行失败。')}`);
   els.monitoringStatus.textContent = parts.join(' · ');
   els.monitoringStatus.className = monitoring.lastError ? 'field-message error' : enabled ? 'field-message success' : 'field-message';
 }
@@ -670,9 +725,7 @@ function renderRecovery(recovery = {}) {
     return;
   }
 
-  const failedLayers = Object.entries(result.steps || {})
-    .filter(([, step]) => step && step.ok === false)
-    .map(([name, step]) => `${name}: ${step.error || '失败'}`);
+  const failedLayers = formatStepFailures(result.steps || {}, '恢复失败，请稍后重试。');
   els.recoveryStatus.textContent = `部分恢复失败：${failedLayers.join('；') || '请查看日志'}`;
   els.recoveryStatus.className = 'field-message error';
 }
@@ -692,10 +745,17 @@ function runGuidanceAction(actionId) {
 }
 
 function formatConsistencySteps(steps = {}) {
-  const failed = Object.entries(steps)
-    .filter(([, step]) => step && step.ok === false)
-    .map(([name, step]) => `${name}: ${step.error || '失败'}`);
-  return failed;
+  return formatStepFailures(steps, '环境操作失败，请稍后重试。');
+}
+
+function formatRunningBrowsers(running = []) {
+  const labels = { chrome: 'Chrome', edge: 'Edge' };
+  const names = running.map((name) => labels[name] || name).filter(Boolean);
+  return names.length ? names.join(' / ') : 'Chrome / Edge';
+}
+
+function isBrowserRunningPreflight(steps = {}) {
+  return steps.preflight?.error === 'BROWSER_RUNNING';
 }
 
 function renderEnvironmentConsistency(consistency = {}) {
@@ -747,7 +807,9 @@ function renderEnvironmentConsistency(consistency = {}) {
       els.environmentConsistencyStatus.className = 'field-message success';
     } else {
       const failed = formatConsistencySteps(restoreResult.steps);
-      els.environmentConsistencyStatus.textContent = `还原未完全成功：${failed.join('；') || '请查看日志'}`;
+      els.environmentConsistencyStatus.textContent = isBrowserRunningPreflight(restoreResult.steps)
+        ? `请先完全关闭 ${formatRunningBrowsers(restoreResult.steps.preflight.running)}，再重试还原环境。`
+        : `还原未完全成功：${failed.join('；') || '请查看日志'}`;
       els.environmentConsistencyStatus.className = 'field-message error';
     }
     return;
@@ -760,9 +822,8 @@ function renderEnvironmentConsistency(consistency = {}) {
       els.environmentConsistencyStatus.className = 'field-message success';
     } else {
       const failed = formatConsistencySteps(applyResult.steps);
-      const browserRunning = applyResult.steps?.preflight?.error === 'BROWSER_RUNNING';
-      els.environmentConsistencyStatus.textContent = browserRunning
-        ? '请先完全关闭 Chrome 和 Edge，再重试一键对齐。'
+      els.environmentConsistencyStatus.textContent = isBrowserRunningPreflight(applyResult.steps)
+        ? `请先完全关闭 ${formatRunningBrowsers(applyResult.steps.preflight.running)}，再重试一键对齐。`
         : `对齐未完全成功：${failed.join('；') || '请查看日志'}`;
       els.environmentConsistencyStatus.className = 'field-message error';
     }
@@ -964,6 +1025,10 @@ for (const tab of document.querySelectorAll('[data-view-tab]')) {
   tab.addEventListener('click', () => setActiveView(tab.dataset.viewTab));
 }
 
+for (const shortcut of document.querySelectorAll('[data-open-view]')) {
+  shortcut.addEventListener('click', () => setActiveView(shortcut.dataset.openView));
+}
+
 els.guardToggle.addEventListener('click', async () => {
   if (currentStatus && currentStatus.guardState === 'ENABLED') {
     setBusy(true);
@@ -998,18 +1063,18 @@ els.applyEnvironmentConsistency.addEventListener('click', async () => {
   setBusy(true);
   try {
     els.environmentConsistencyStatus.textContent =
-      '正在对齐时区与 WebRTC（保留中文输入法，请先关闭 Chrome/Edge）…';
+      '正在对齐时区与 WebRTC（保留中文输入法）…';
     els.environmentConsistencyStatus.className = 'field-message';
     await persistEnvironmentConsistencyConfig();
     const result = await invokeWithTimeout(
       () => window.networkGuard.applyEnvironmentConsistency(),
       120000,
-      '环境对齐超时：请完全关闭 Chrome 和 Edge 后重试。'
+      '环境对齐超时，请稍后重试。'
     );
     if (result.status) render(result.status);
     if (result.ok && result.restartRequired) {
       els.environmentConsistencyStatus.textContent =
-        '对齐完成，应用约 2 秒后自动重启并重新检测。若仍失败，请重新登录当前系统账户后再检测。';
+        '对齐完成，应用约 2 秒后自动重启并重新检测；Chrome/Edge 重启后会应用浏览器策略。';
       els.environmentConsistencyStatus.className = 'field-message success';
       return;
     }
@@ -1018,7 +1083,7 @@ els.applyEnvironmentConsistency.addEventListener('click', async () => {
     }
     await runPostApplyCheck();
   } catch (error) {
-    els.environmentConsistencyStatus.textContent = error.message || '环境对齐失败。';
+    els.environmentConsistencyStatus.textContent = formatUserError(error, '环境对齐失败。');
     els.environmentConsistencyStatus.className = 'field-message error';
   } finally {
     consistencyActionInFlight = false;
@@ -1037,7 +1102,7 @@ els.restoreEnvironmentConsistency.addEventListener('click', async () => {
       await runPostApplyCheck();
     }
   } catch (error) {
-    els.environmentConsistencyStatus.textContent = error.message || '环境还原失败。';
+    els.environmentConsistencyStatus.textContent = formatUserError(error, '环境还原失败。');
     els.environmentConsistencyStatus.className = 'field-message error';
   } finally {
     setBusy(false);
@@ -1065,7 +1130,7 @@ els.backupEnvironmentNow.addEventListener('click', async () => {
     els.environmentConsistencyStatus.textContent = '已重新备份当前环境。';
     els.environmentConsistencyStatus.className = 'field-message success';
   } catch (error) {
-    els.environmentConsistencyStatus.textContent = error.message || '备份失败。';
+    els.environmentConsistencyStatus.textContent = formatUserError(error, '备份失败。');
     els.environmentConsistencyStatus.className = 'field-message error';
   } finally {
     setBusy(false);
@@ -1137,11 +1202,12 @@ if (els.saveTargetRules) {
       }
       setHelp('拦截规则已更新。', 'success');
     } catch (error) {
+      const message = formatUserError(error, '规则保存失败。');
       if (els.targetRulesStatus) {
-        els.targetRulesStatus.textContent = error.message || '规则保存失败。';
+        els.targetRulesStatus.textContent = message;
         els.targetRulesStatus.className = 'field-message error';
       }
-      setHelp(error.message || '规则保存失败。', 'error');
+      setHelp(message, 'error');
     } finally {
       setBusy(false);
     }
@@ -1157,10 +1223,10 @@ if (els.saveMonitoring) {
       setHelp('周期监控设置已保存。', 'success');
     } catch (error) {
       if (els.monitoringStatus) {
-        els.monitoringStatus.textContent = error.message || '监控设置保存失败。';
+        els.monitoringStatus.textContent = formatUserError(error, '监控设置保存失败。');
         els.monitoringStatus.className = 'field-message error';
       }
-      setHelp(error.message || '监控设置保存失败。', 'error');
+      setHelp(formatUserError(error, '监控设置保存失败。'), 'error');
     } finally {
       setBusy(false);
     }
@@ -1169,7 +1235,6 @@ if (els.saveMonitoring) {
 
 for (const input of [
   els.validationClaude,
-  els.validationCodex,
   els.validationStaticResidentialIp,
   els.validationIpType,
   els.validationRegion,
@@ -1199,9 +1264,9 @@ if (els.saveValidation) {
       els.validationStatus.className = 'field-message success';
       setHelp(hasEnabledValidationChecks(validation) ? '接口校验范围已更新。' : '所有校验项已关闭。', 'success');
     } catch (error) {
-      els.validationStatus.textContent = error.message || '保存失败。';
+      els.validationStatus.textContent = formatUserError(error, '保存失败。');
       els.validationStatus.className = 'field-message error';
-      setHelp(error.message || '保存失败。', 'error');
+      setHelp(formatUserError(error, '保存失败。'), 'error');
     } finally {
       setBusy(false);
     }
@@ -1213,11 +1278,11 @@ if (els.resetValidationDefaults) {
     setBusy(true);
     try {
       render(await window.networkGuard.resetValidationDefaults());
-      els.validationStatus.textContent = '已还原为默认校验范围（Claude + Codex）。';
+      els.validationStatus.textContent = '已还原为默认 Claude / Anthropic 校验范围。';
       els.validationStatus.className = 'field-message success';
       setHelp('校验配置已还原默认。', 'success');
     } catch (error) {
-      els.validationStatus.textContent = error.message || '还原失败。';
+      els.validationStatus.textContent = formatUserError(error, '还原失败。');
       els.validationStatus.className = 'field-message error';
     } finally {
       setBusy(false);
@@ -1235,7 +1300,7 @@ if (els.resetTargetConfigDefaults) {
       els.validationStatus.className = 'field-message success';
       setHelp('全部配置已还原默认。', 'success');
     } catch (error) {
-      els.validationStatus.textContent = error.message || '还原失败。';
+      els.validationStatus.textContent = formatUserError(error, '还原失败。');
       els.validationStatus.className = 'field-message error';
     } finally {
       setBusy(false);
@@ -1249,7 +1314,7 @@ els.saveStaticIp.addEventListener('click', async () => {
     render(await saveStaticIp(els.staticResidentialIp.value));
     setHelp('静态住宅 IP 已保存。', 'success');
   } catch (error) {
-    setHelp(error.message || '保存失败。', 'error');
+    setHelp(formatUserError(error, '保存失败。'), 'error');
   } finally {
     setBusy(false);
   }
@@ -1278,7 +1343,7 @@ els.rebindCurrentExit.addEventListener('click', async () => {
   try {
     render(await window.networkGuard.rebindExitToCurrent());
   } catch (error) {
-    els.bindingHelp.textContent = error.message || '绑定当前出口失败。';
+    els.bindingHelp.textContent = formatUserError(error, '绑定当前出口失败。');
     els.bindingHelp.className = 'field-message error';
   } finally {
     setBusy(false);
@@ -1322,7 +1387,7 @@ els.confirmStaticIp.addEventListener('click', async () => {
     closeStaticIpDialog();
     await enableGuardWithStaticIpHandling();
   } catch (error) {
-    els.staticIpDialogError.textContent = error.message || '保存失败。';
+    els.staticIpDialogError.textContent = formatUserError(error, '保存失败。');
   } finally {
     setBusy(false);
   }

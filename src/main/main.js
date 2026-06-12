@@ -30,7 +30,7 @@ function createWindow() {
     height: 760,
     minWidth: 860,
     minHeight: 640,
-    title: 'Claude Codex Network Guard',
+    title: 'Claude Network Guard',
     backgroundColor: '#f6f7f9',
     icon: appIconPath,
     webPreferences: {
@@ -50,7 +50,7 @@ function createWindow() {
 function createTray() {
   const icon = nativeImage.createFromPath(appIconPath);
   tray = new Tray(icon);
-  tray.setToolTip('Claude Codex Network Guard');
+  tray.setToolTip('Claude Network Guard');
   updateTray();
   tray.on('click', () => {
     if (mainWindow) {
@@ -131,7 +131,7 @@ function notifyBlocked(event) {
   };
   const reasons = event.reasons && event.reasons.length ? event.reasons.map((reason) => labels[reason] || reason).join(', ') : 'UNKNOWN';
   new Notification({
-    title: 'Claude/Codex 请求已拦截',
+    title: 'Claude 请求已拦截',
     body: `${event.host} 被阻断：${reasons}`
   }).show();
 }

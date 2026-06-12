@@ -24,7 +24,7 @@ test('captureCurrentState returns windows timezone from mock exec', async () => 
   assert.equal(state.chrome.installed, false);
 });
 
-test('applyProfile blocks when browser is running', async () => {
+test('applyProfile blocks browser preference changes when browser is running', async () => {
   const applier = new EnvironmentApplierWin({
     platform: 'win32',
     execFile: async (command) => {
@@ -43,7 +43,7 @@ test('applyProfile blocks when browser is running', async () => {
     windowsTimeZone: 'Central Standard Time',
     language: 'en-US',
     languages: ['en-US']
-  });
+  }, { keepChineseInput: false });
   assert.equal(result.ok, false);
   assert.equal(result.steps.preflight.error, 'BROWSER_RUNNING');
 });
@@ -56,7 +56,7 @@ test('applyProfile keeps Chinese input when keepChineseInput is true', async () 
       if (command === 'powershell.exe') {
         script = args[args.length - 1] || '';
       }
-      if (command === 'tasklist') return 'INFO: No tasks';
+      if (command === 'tasklist') return 'chrome.exe   123 Console';
       if (command === 'reg') return '';
       if (command === 'tzutil') return '';
       return '';

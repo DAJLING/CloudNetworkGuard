@@ -219,9 +219,9 @@ test('GuardService reloads editable target config into status and firewall manag
     JSON.stringify(
       {
         version: 1,
-        rules: [{ id: 'example-api', domainPattern: 'api.example.com', action: 'GUARD' }],
-        healthCheckHosts: ['api.example.com'],
-        controlHosts: ['api.example.com']
+        rules: [{ id: 'anthropic-api', domainPattern: 'api.anthropic.com', action: 'GUARD' }],
+        healthCheckHosts: ['api.anthropic.com'],
+        controlHosts: ['api.anthropic.com']
       },
       null,
       2
@@ -230,8 +230,8 @@ test('GuardService reloads editable target config into status and firewall manag
 
   const status = await service.reloadTargetConfig();
   assert.equal(status.targetConfig.rules.length, 1);
-  assert.equal(status.targetConfig.rules[0].domainPattern, 'api.example.com');
-  assert.deepEqual(service.firewallManager.hosts, ['api.example.com']);
+  assert.equal(status.targetConfig.rules[0].domainPattern, 'api.anthropic.com');
+  assert.deepEqual(service.firewallManager.hosts, ['api.anthropic.com']);
   assert.deepEqual(clearCalls[0], [{ name: 'old-rule', remoteIp: '203.0.113.8' }]);
 });
 
@@ -242,11 +242,11 @@ test('GuardService saveTargetRules persists rules and reloads firewall hosts', a
   service.firewallManager.clearBlock = async () => ({ mode: 'CLEARED', rules: [] });
 
   const status = await service.saveTargetRules([
-    { id: 'custom-api', domainPattern: 'api.example.com', action: 'GUARD' }
+    { id: 'custom-api', domainPattern: 'api.anthropic.com', action: 'GUARD' }
   ]);
 
   assert.equal(status.targetConfig.rules.length, 1);
-  assert.deepEqual(service.firewallManager.hosts, ['api.example.com']);
+  assert.deepEqual(service.firewallManager.hosts, ['api.anthropic.com']);
 });
 
 test('GuardService blocks enable when static residential IP is missing', async () => {
@@ -289,7 +289,7 @@ test('GuardService skips static residential IP preflight when that check is disa
   service.checker.claudeWebProbe = async () => ({ verdict: 'PASS', reasons: [], skipped: true });
   service.checker.environmentCheck = () => ({ verdict: 'PASS', reasons: [], timeZone: 'America/New_York', language: 'en-US' });
   await service.saveValidationConfig({
-    services: { claude: true, codex: true },
+    services: { claude: true },
     checks: { ...DEFAULT_VALIDATION_CHECKS, staticResidentialIp: false },
     webProbe: { enabled: false, url: '' },
     useCustomHosts: false
@@ -310,7 +310,7 @@ test('GuardService keeps guard disabled when every validation check is disabled'
   const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
   service.firewallManager.clearBlock = async () => ({ mode: 'CLEARED', rules: [] });
   await service.saveValidationConfig({
-    services: { claude: false, codex: false },
+    services: { claude: false },
     checks: Object.fromEntries(Object.keys(DEFAULT_VALIDATION_CHECKS).map((key) => [key, false])),
     webProbe: { enabled: false, url: '' },
     useCustomHosts: false
@@ -440,10 +440,10 @@ test('GuardService does not block target usage when usage-rate validation is dis
       reasons: [],
       allowTargetTraffic: true
     },
-    usageEvents: Array.from({ length: 200 }, () => ({ host: 'api.openai.com', at: Date.now() }))
+    usageEvents: Array.from({ length: 200 }, () => ({ host: 'api.anthropic.com', at: Date.now() }))
   });
 
-  const result = service.recordTargetRequest('api.openai.com');
+  const result = service.recordTargetRequest('api.anthropic.com');
 
   assert.equal(result.block, false);
   assert.equal(store.getState().lastCheck.allowTargetTraffic, true);
@@ -533,7 +533,7 @@ test('GuardService decorateCheckWithFirewall treats macOS pf modes as successful
 
   const blocked = service.decorateCheckWithFirewall(
     { verdict: 'BLOCK', reasons: ['DNS_CHECK_FAILED'], checkItems: [] },
-    { mode: 'PF_BLOCK', rules: [{ anchor: 'com.local.claude-codex-network-guard' }], lastError: null }
+    { mode: 'PF_BLOCK', rules: [{ anchor: 'com.local.claude-network-guard' }], lastError: null }
   );
   const cleared = service.decorateCheckWithFirewall(
     { verdict: 'PASS', reasons: [], checkItems: [] },

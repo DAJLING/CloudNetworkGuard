@@ -20,7 +20,7 @@ Existing patterns to follow:
 
 - `emergencyRestore()` in `guard-service.js`: step-based execution, partial failure reporting, persisted result in store.
 - `reason-catalog.js` guidance actions wired through `runGuidanceAction()` in `renderer.js`.
-- Local-only state in `store.js` under `%APPDATA%\claude-codex-network-guard\`.
+- Local-only state in `store.js` under `%APPDATA%\claude-network-guard\`.
 
 ## Product Principles
 

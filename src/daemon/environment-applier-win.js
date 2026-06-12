@@ -173,14 +173,16 @@ class EnvironmentApplierWin {
       return { ok: false, steps: { platform: stepResult(false, 'UNSUPPORTED_PLATFORM') } };
     }
 
-    const running = await this.isBrowserRunning();
-    if (running.length) {
-      return {
-        ok: false,
-        steps: {
-          preflight: stepResult(false, 'BROWSER_RUNNING', { running })
-        }
-      };
+    if (!keepChineseInput) {
+      const running = await this.isBrowserRunning();
+      if (running.length) {
+        return {
+          ok: false,
+          steps: {
+            preflight: stepResult(false, 'BROWSER_RUNNING', { running })
+          }
+        };
+      }
     }
 
     const steps = {};

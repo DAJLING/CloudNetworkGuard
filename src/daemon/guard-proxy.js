@@ -71,7 +71,7 @@ class GuardProxy {
     const decision = this.evaluateTargetRequest(host);
     if (decision.block) {
       this.emitBlocked(host, 'CONNECT');
-      clientSocket.write('HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nNetwork Guard blocked this Claude/Codex request.');
+      clientSocket.write('HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nClaude Network Guard blocked this request.');
       clientSocket.destroy();
       return;
     }
@@ -101,7 +101,7 @@ class GuardProxy {
     if (decision.block) {
       this.emitBlocked(targetUrl.hostname, targetUrl.protocol);
       clientResponse.writeHead(403, { 'content-type': 'text/plain' });
-      clientResponse.end('Network Guard blocked this Claude/Codex request.');
+      clientResponse.end('Claude Network Guard blocked this request.');
       return;
     }
 

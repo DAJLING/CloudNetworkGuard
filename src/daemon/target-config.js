@@ -12,6 +12,7 @@ const { defaultDataDir } = require('./store');
 
 const TARGET_CONFIG_FILE = 'target-rules.json';
 const STATIC_IP_SKIP_VALUE = '0.0.0.0';
+const CLAUDE_TARGET_SUFFIXES = Object.freeze(['claude.ai', 'anthropic.com']);
 
 const DEFAULT_VALIDATION_CHECKS = Object.freeze({
   staticResidentialIp: true,
@@ -82,9 +83,16 @@ function hostFromPattern(pattern) {
   return normalizeDomainPattern(pattern).replace(/^\*\./, '');
 }
 
+function isClaudeHost(host) {
+  const normalized = normalizeHost(host).replace(/^\*\./, '');
+  return CLAUDE_TARGET_SUFFIXES.some(
+    (suffix) => normalized === suffix || normalized.endsWith(`.${suffix}`)
+  );
+}
+
 function normalizeRule(rule, index) {
   const domainPattern = normalizeDomainPattern(rule && (rule.domainPattern || rule.host || rule.domain));
-  if (!domainPattern) return null;
+  if (!domainPattern || !isClaudeHost(domainPattern)) return null;
 
   return {
     id: String((rule && rule.id) || `target-${index + 1}`).trim() || `target-${index + 1}`,
@@ -96,7 +104,19 @@ function normalizeRule(rule, index) {
 
 function normalizeHosts(hosts) {
   if (!Array.isArray(hosts)) return [];
-  return unique(hosts.map(hostFromPattern));
+  return unique(hosts.map(hostFromPattern).filter(isClaudeHost));
+}
+
+function normalizeWebProbeUrl(value) {
+  try {
+    const url = new URL(String(value || '').trim());
+    if ((url.protocol === 'https:' || url.protocol === 'http:') && isClaudeHost(url.hostname)) {
+      return url.toString();
+    }
+  } catch {
+    // Fall through to the Claude default.
+  }
+  return DEFAULT_TARGET_WEB_PROBE_URL;
 }
 
 function deriveHostsFromRules(rules) {
@@ -109,7 +129,7 @@ function deriveHostsFromRules(rules) {
 
 function defaultValidation() {
   return {
-    services: { claude: true, codex: true },
+    services: { claude: true },
     checks: { ...DEFAULT_VALIDATION_CHECKS },
     webProbe: { enabled: true, url: DEFAULT_TARGET_WEB_PROBE_URL },
     useCustomHosts: false,
@@ -137,16 +157,12 @@ function normalizeValidation(raw) {
 
   return {
     services: {
-      claude: services.claude !== false,
-      codex: services.codex !== false
+      claude: services.claude !== false
     },
     checks: normalizeValidationChecks(raw.checks),
     webProbe: {
       enabled: webProbe.enabled !== false,
-      url:
-        typeof webProbe.url === 'string' && webProbe.url.trim()
-          ? webProbe.url.trim()
-          : DEFAULT_TARGET_WEB_PROBE_URL
+      url: normalizeWebProbeUrl(webProbe.url)
     },
     useCustomHosts: raw.useCustomHosts === true,
     customHealthCheckHosts,
@@ -165,7 +181,7 @@ function legacyValidationFromRaw(raw) {
     customControlHosts: normalizeHosts(raw.controlHosts),
     webProbe: {
       enabled: Boolean(raw.webProbeUrl),
-      url: typeof raw.webProbeUrl === 'string' && raw.webProbeUrl.trim() ? raw.webProbeUrl.trim() : DEFAULT_TARGET_WEB_PROBE_URL
+      url: normalizeWebProbeUrl(raw.webProbeUrl)
     }
   };
 }
@@ -192,7 +208,7 @@ function resolveValidationHosts(validation) {
   const normalized = normalizeValidation(validation);
   const needsTargetHosts = hasTargetValidationChecks(normalized);
 
-  if (needsTargetHosts && !normalized.useCustomHosts && !normalized.services.claude && !normalized.services.codex) {
+  if (needsTargetHosts && !normalized.useCustomHosts && !normalized.services.claude) {
     throw new Error('VALIDATION_SERVICE_REQUIRED');
   }
 
@@ -218,11 +234,6 @@ function resolveValidationHosts(validation) {
     healthCheckHosts.push(...VALIDATION_SERVICES.claude.healthCheckHosts);
     controlHosts.push(...VALIDATION_SERVICES.claude.controlHosts);
   }
-  if (needsTargetHosts && normalized.services.codex) {
-    healthCheckHosts.push(...VALIDATION_SERVICES.codex.healthCheckHosts);
-    controlHosts.push(...VALIDATION_SERVICES.codex.controlHosts);
-  }
-
   let webProbeUrl = null;
   if (normalized.webProbe.enabled) {
     webProbeUrl = normalized.webProbe.url || VALIDATION_SERVICES.claude.defaultWebProbeUrl;
@@ -252,8 +263,11 @@ function defaultTargetConfig() {
 }
 
 function normalizeTargetConfig(raw, filePath) {
-  const rules = Array.isArray(raw && raw.rules)
+  const normalizedRules = Array.isArray(raw && raw.rules)
     ? raw.rules.map(normalizeRule).filter(Boolean)
+    : DEFAULT_TARGET_RULES.map(normalizeRule).filter(Boolean);
+  const rules = normalizedRules.length
+    ? normalizedRules
     : DEFAULT_TARGET_RULES.map(normalizeRule).filter(Boolean);
   const derivedHosts = deriveHostsFromRules(rules);
   const firewallHosts = normalizeHosts(raw && raw.firewallHosts);
@@ -357,6 +371,9 @@ class TargetConfigManager {
     const normalizedRules = Array.isArray(rulesInput)
       ? rulesInput.map(normalizeRule).filter(Boolean)
       : [];
+    if (Array.isArray(rulesInput) && normalizedRules.length !== rulesInput.length) {
+      throw new Error('CLAUDE_TARGET_REQUIRED');
+    }
     if (!normalizedRules.length) throw new Error('TARGET_RULES_REQUIRED');
 
     const ids = new Set();
@@ -387,6 +404,7 @@ class TargetConfigManager {
 
 module.exports = {
   DEFAULT_VALIDATION_CHECKS,
+  CLAUDE_TARGET_SUFFIXES,
   STATIC_IP_SKIP_VALUE,
   TARGET_CONFIG_FILE,
   defaultTargetConfig,
@@ -395,10 +413,12 @@ module.exports = {
   deriveHostsFromRules,
   hasEnabledValidationChecks,
   hasTargetValidationChecks,
+  isClaudeHost,
   isValidIpv4,
   normalizeStaticResidentialIp,
   normalizeTargetConfig,
   normalizeValidation,
+  normalizeWebProbeUrl,
   resolveValidationHosts,
   TargetConfigManager,
   VALIDATION_SERVICES

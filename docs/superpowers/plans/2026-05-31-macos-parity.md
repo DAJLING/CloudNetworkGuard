@@ -1007,7 +1007,7 @@ test('renderPfBlockRule renders IPv4 and IPv6 target set', () => {
 
 test('renderPfBlockRule rejects invalid IP literals', () => {
   const { renderPfBlockRule } = require('../src/daemon/firewall-manager');
-  assert.throws(() => renderPfBlockRule(['api.openai.com']), /INVALID_PF_IP/);
+  assert.throws(() => renderPfBlockRule(['api.anthropic.com']), /INVALID_PF_IP/);
 });
 
 test('ensurePfAnchorBlock adds one marked anchor block', () => {
@@ -1016,8 +1016,8 @@ test('ensurePfAnchorBlock adds one marked anchor block', () => {
   const twice = ensurePfAnchorBlock(once);
 
   assert.match(once, new RegExp(PF_CONF_BLOCK_START));
-  assert.match(once, /anchor "com\.local\.claude-codex-network-guard"/);
-  assert.match(once, /load anchor "com\.local\.claude-codex-network-guard"/);
+  assert.match(once, /anchor "com\.local\.claude-network-guard"/);
+  assert.match(once, /load anchor "com\.local\.claude-network-guard"/);
   assert.match(once, new RegExp(PF_CONF_BLOCK_END));
   assert.equal(twice, once);
 });
@@ -1045,11 +1045,11 @@ Expected: FAIL because the pf helper exports do not exist.
 In `src/daemon/firewall-manager.js`, add these constants near the existing constants:
 
 ```javascript
-const PF_ANCHOR_NAME = 'com.local.claude-codex-network-guard';
+const PF_ANCHOR_NAME = 'com.local.claude-network-guard';
 const PF_ANCHOR_PATH = `/etc/pf.anchors/${PF_ANCHOR_NAME}`;
 const PF_CONF_PATH = '/etc/pf.conf';
-const PF_CONF_BLOCK_START = '# ClaudeCodexNetworkGuard START';
-const PF_CONF_BLOCK_END = '# ClaudeCodexNetworkGuard END';
+const PF_CONF_BLOCK_START = '# ClaudeNetworkGuard START';
+const PF_CONF_BLOCK_END = '# ClaudeNetworkGuard END';
 ```
 
 Add these helper functions after `sanitizeRuleName()`:
@@ -1140,7 +1140,7 @@ test('applyMacBlock writes anchor, patches pf.conf, and loads pf', async () => {
   const privilegedWrites = [];
   const privilegedCommands = [];
   const manager = new FirewallManager({
-    hosts: ['api.openai.com'],
+    hosts: ['api.anthropic.com'],
     platform: 'darwin',
     fsImpl: {
       existsSync: (filePath) => Object.prototype.hasOwnProperty.call(files, filePath),
@@ -1151,7 +1151,7 @@ test('applyMacBlock writes anchor, patches pf.conf, and loads pf', async () => {
     },
     resolveTargetIpsImpl: async () => ({
       ips: ['203.0.113.10'],
-      results: [{ host: 'api.openai.com', ips: ['203.0.113.10'], errors: [] }]
+      results: [{ host: 'api.anthropic.com', ips: ['203.0.113.10'], errors: [] }]
     }),
     macRunner: {
       writeFilePrivileged: async (filePath, content) => {
@@ -1172,7 +1172,7 @@ test('applyMacBlock writes anchor, patches pf.conf, and loads pf', async () => {
 
   assert.equal(result.mode, 'PF_BLOCK');
   assert.equal(result.applied, true);
-  assert.equal(privilegedWrites[0].filePath, '/etc/pf.anchors/com.local.claude-codex-network-guard');
+  assert.equal(privilegedWrites[0].filePath, '/etc/pf.anchors/com.local.claude-network-guard');
   assert.match(privilegedWrites[0].content, /block drop out quick to/);
   assert.match(privilegedWrites[1].content, /load anchor/);
   assert.deepEqual(privilegedCommands[0], [
@@ -1185,13 +1185,13 @@ test('clearMacBlock removes anchor block and reloads pf.conf', async () => {
   const files = {
     '/etc/pf.conf': [
       'set skip on lo0',
-      '# ClaudeCodexNetworkGuard START',
-      'anchor "com.local.claude-codex-network-guard"',
-      'load anchor "com.local.claude-codex-network-guard" from "/etc/pf.anchors/com.local.claude-codex-network-guard"',
-      '# ClaudeCodexNetworkGuard END',
+      '# ClaudeNetworkGuard START',
+      'anchor "com.local.claude-network-guard"',
+      'load anchor "com.local.claude-network-guard" from "/etc/pf.anchors/com.local.claude-network-guard"',
+      '# ClaudeNetworkGuard END',
       ''
     ].join('\n'),
-    '/etc/pf.anchors/com.local.claude-codex-network-guard': 'block drop out quick to { 203.0.113.10 }\n'
+    '/etc/pf.anchors/com.local.claude-network-guard': 'block drop out quick to { 203.0.113.10 }\n'
   };
   const commands = [];
   const manager = new FirewallManager({
@@ -1221,14 +1221,14 @@ test('clearMacBlock removes anchor block and reloads pf.conf', async () => {
 
   assert.equal(result.mode, 'PF_CLEARED');
   assert.equal(result.rules.length, 0);
-  assert.doesNotMatch(files['/etc/pf.conf'], /ClaudeCodexNetworkGuard START/);
-  assert.equal(files['/etc/pf.anchors/com.local.claude-codex-network-guard'], undefined);
+  assert.doesNotMatch(files['/etc/pf.conf'], /ClaudeNetworkGuard START/);
+  assert.equal(files['/etc/pf.anchors/com.local.claude-network-guard'], undefined);
   assert.deepEqual(commands[0], [['pfctl', '-f', '/etc/pf.conf']]);
 });
 
 test('applyMacBlock returns partial result when authorization fails', async () => {
   const manager = new FirewallManager({
-    hosts: ['api.openai.com'],
+    hosts: ['api.anthropic.com'],
     platform: 'darwin',
     resolveTargetIpsImpl: async () => ({ ips: ['203.0.113.10'], results: [] }),
     macRunner: {
@@ -1445,7 +1445,7 @@ test('GuardService decorateCheckWithFirewall treats macOS pf modes as successful
 
   const blocked = service.decorateCheckWithFirewall(
     { verdict: 'BLOCK', reasons: ['DNS_CHECK_FAILED'], checkItems: [] },
-    { mode: 'PF_BLOCK', rules: [{ anchor: 'com.local.claude-codex-network-guard' }], lastError: null }
+    { mode: 'PF_BLOCK', rules: [{ anchor: 'com.local.claude-network-guard' }], lastError: null }
   );
   const cleared = service.decorateCheckWithFirewall(
     { verdict: 'PASS', reasons: [], checkItems: [] },
@@ -1553,7 +1553,7 @@ with:
 
 ```markdown
 - macOS proxy settings use `networksetup` and default to the `Wi-Fi` service. Set `NETWORK_GUARD_MAC_SERVICE` to target another network service.
-- macOS firewall fallback uses an app-owned `pf` anchor at `/etc/pf.anchors/com.local.claude-codex-network-guard` and may request administrator authorization. The app only manages its marked `pf.conf` block and its own anchor file.
+- macOS firewall fallback uses an app-owned `pf` anchor at `/etc/pf.anchors/com.local.claude-network-guard` and may request administrator authorization. The app only manages its marked `pf.conf` block and its own anchor file.
 ```
 
 - [ ] **Step 7: Run focused tests**
@@ -1627,8 +1627,8 @@ Manual checks:
 2. Configure static IP as `0.0.0.0` for the smoke test.
 3. Trigger a blocked guard check.
 4. Approve the administrator prompt.
-5. Verify `/etc/pf.anchors/com.local.claude-codex-network-guard` exists.
-6. Verify `/etc/pf.conf` contains exactly one `ClaudeCodexNetworkGuard START` block.
+5. Verify `/etc/pf.anchors/com.local.claude-network-guard` exists.
+6. Verify `/etc/pf.conf` contains exactly one `ClaudeNetworkGuard START` block.
 7. Disable guard or make checks pass.
 8. Verify the marked `pf.conf` block is gone and the app anchor file is removed.
 

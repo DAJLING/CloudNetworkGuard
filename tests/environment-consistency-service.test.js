@@ -49,7 +49,7 @@ test('apply creates backup then applies profile', async () => {
   assert.equal(applyOptions.keepChineseInput, true);
 });
 
-test('apply fails fast when browsers are running', async () => {
+test('apply fails fast when browsers are running and browser language changes are enabled', async () => {
   const service = new EnvironmentConsistencyService({
     dataDir: '/tmp',
     backupStore: { exists: () => false, getSummary: () => ({ hasBackup: false, createdAt: null }) },
@@ -66,11 +66,46 @@ test('apply fails fast when browsers are running', async () => {
 
   const result = await service.apply({
     exitIp: { countryCode: 'US', regionName: 'Texas' },
-    config: { deriveFromExitIp: true, profileOverride: {} }
+    config: { deriveFromExitIp: true, keepChineseInput: false, profileOverride: {} }
   });
 
   assert.equal(result.ok, false);
   assert.equal(result.steps.preflight.error, 'BROWSER_RUNNING');
+});
+
+test('windows apply allows running browsers when keeping Chinese input', async () => {
+  let applied = false;
+  const service = new EnvironmentConsistencyService({
+    dataDir: '/tmp',
+    backupStore: {
+      exists: () => true,
+      load: () => ({ version: 1, windows: {} }),
+      getSummary: () => ({ hasBackup: true, createdAt: '2026-06-06T01:00:00.000Z' })
+    },
+    applier: {
+      isSupported: () => true,
+      isBrowserRunning: async () => ['chrome'],
+      applyProfile: async () => {
+        applied = true;
+        return { ok: true, steps: { 'windows.timezone': { ok: true } } };
+      }
+    },
+    platform: 'win32',
+    resolveProfile: () => ({
+      timeZone: 'America/Chicago',
+      windowsTimeZone: 'Central Standard Time',
+      language: 'en-US',
+      languages: ['en-US']
+    })
+  });
+
+  const result = await service.apply({
+    exitIp: { countryCode: 'US', regionName: 'Texas' },
+    config: { deriveFromExitIp: true, keepChineseInput: true, profileOverride: {} }
+  });
+
+  assert.equal(applied, true);
+  assert.equal(result.ok, true);
 });
 
 test('restore fails without backup', async () => {

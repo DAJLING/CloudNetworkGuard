@@ -120,10 +120,14 @@ function notifyBlocked(event) {
     STATIC_RESIDENTIAL_IP_REQUIRED: '未配置静态住宅 IP',
     STATIC_RESIDENTIAL_IP_MISMATCH: '静态住宅 IP 不匹配',
     STATIC_RESIDENTIAL_IP_SKIPPED: '静态住宅 IP 校验已跳过',
+    CLAUDE_ACCOUNT_RISK_ACK_REQUIRED: '需要确认 Claude 账号风险',
     BLOCKED_REGION: '被封锁区域',
     NO_EXTERNAL_ACCESS: '无法访问外网目标',
     DATACENTER_IP: '数据中心 IP',
+    IP_TYPE_UNCONFIRMED: 'IP 类型未确认',
     VPN_OR_PROXY_RISK: '代理/VPN/Tor 风险',
+    IP_SHARED_USERS_RISK: 'IP 共享人数过高',
+    IP_RISK_DATA_UNAVAILABLE: 'Ping0 风控数据不可用',
     BLACKLISTED: '黑名单命中',
     STATIC_WINDOW_PENDING: '静态 IP 观察不足 24 小时',
     IP_CHANGED: 'IP 已变化',
@@ -138,8 +142,8 @@ function notifyBlocked(event) {
 
 function wireIpc() {
   ipcMain.handle('guard:get-status', () => service.getStatus());
-  ipcMain.handle('guard:enable', async (_event, mode) => {
-    const status = await service.enableGuard(mode);
+  ipcMain.handle('guard:enable', async (_event, mode, options) => {
+    const status = await service.enableGuard(mode, options || {});
     updateTray();
     return status;
   });

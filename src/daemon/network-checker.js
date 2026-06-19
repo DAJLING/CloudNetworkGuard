@@ -4,6 +4,7 @@ const { runFreeProviders } = require('./providers');
 const { scoreProviderResults, combineVerdicts, normalizeEnabledChecks } = require('./scoring');
 const { hashIp, maskIp } = require('./static-ip-observer');
 const { checkClientEnvironment, buildEnvironmentCheckInput } = require('./environment-checker');
+const { checkBrowserWebRtcPolicies } = require('./browser-webrtc-checker');
 const { probeClaudeWeb } = require('./claude-web-probe');
 const { CheckReason, NetworkVerdict } = require('../shared/constants');
 const { normalizeHost } = require('./rules');
@@ -11,6 +12,8 @@ const { STATIC_IP_SKIP_VALUE } = require('./target-config');
 
 const TARGET_HEALTH_HOSTS = ['claude.ai', 'api.anthropic.com'];
 const CLAUDE_CONTROL_HOSTS = ['claude.ai', 'api.anthropic.com'];
+const PING0_SOURCE = 'ping0.cc';
+const PING0_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 async function dnsProbe(host) {
   try {
@@ -218,6 +221,45 @@ function checkItem(id, label, verdict, detail = '--', reason = null) {
   return { id, label, verdict, detail, reason };
 }
 
+function isFiniteNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function findCurrentProviderIp(providerResults = []) {
+  const usable = providerResults.find((result) => result && !result.error && result.ip);
+  return usable ? usable.ip : null;
+}
+
+function hasRequiredPing0Data(result) {
+  return Boolean(result && !result.error && isFiniteNumber(result.riskScore) && isFiniteNumber(result.sharedUsersMax));
+}
+
+function cacheablePing0Result(result) {
+  return {
+    source: PING0_SOURCE,
+    ipType: result.ipType || 'unknown',
+    countryCode: result.countryCode || 'unknown',
+    regionName: result.regionName || 'unknown',
+    asn: result.asn || null,
+    riskScore: result.riskScore,
+    ping0Purity: result.ping0Purity || null,
+    sharedUsers: result.sharedUsers || null,
+    sharedUsersMax: result.sharedUsersMax,
+    confidence: result.confidence || 40
+  };
+}
+
+function hydrateCachedPing0Result(cache, currentIp, originalError) {
+  return {
+    ...(cache.result || {}),
+    source: PING0_SOURCE,
+    ip: currentIp,
+    error: null,
+    cached: true,
+    cacheReason: originalError || null
+  };
+}
+
 function itemVerdict(verdict) {
   if (verdict === NetworkVerdict.PASS) return 'PASS';
   if (verdict === NetworkVerdict.WARN || verdict === NetworkVerdict.OBSERVING) return 'WARN';
@@ -295,6 +337,27 @@ function summarizeAccessLayer(externalAccess, layer) {
   return checkItem(layer, layer.toUpperCase(), 'PASS', `${results.length} 个目标通过`, null);
 }
 
+function summarizeBrowserWebRtc(browserWebRtc) {
+  if (!browserWebRtc || browserWebRtc.supported === false) return null;
+  const browsers = Array.isArray(browserWebRtc.browsers) ? browserWebRtc.browsers : [];
+  const installed = browsers.filter((browser) => browser.installed);
+  if (!installed.length) return 'WebRTC 策略未检测到浏览器';
+  const unsafe = installed.filter((browser) => !browser.policyApplied);
+  if (!unsafe.length) return 'WebRTC 已禁用';
+  const labels = unsafe.map((browser) => (browser.id === 'edge' ? 'Edge' : 'Chrome'));
+  return `WebRTC 未禁用: ${labels.join(', ')}`;
+}
+
+function summarizeProviderErrors(providerScore) {
+  const sources = Array.isArray(providerScore.sources) ? providerScore.sources : [];
+  const failures = sources.filter((result) => result && result.error);
+  if (!failures.length) return '检测源不可用';
+  return failures
+    .map((result) => `${result.source || 'provider'}: ${result.error}`)
+    .slice(0, 3)
+    .join('；');
+}
+
 function buildCheckItems({ targetConfig, externalAccess, providerScore, staticObservation, environment, claudeWeb, binding, usage }) {
   const enabledChecks = enabledChecksFromConfig(targetConfig);
   const providerReasons = new Set(providerScore.reasons || []);
@@ -316,31 +379,39 @@ function buildCheckItems({ targetConfig, externalAccess, providerScore, staticOb
 
   if (enabledChecks.ipType) {
     const providerUnavailable = providerReasons.has(CheckReason.PROVIDER_UNAVAILABLE);
-    const ipTypeDetail = providerUnavailable ? '检测源不可用' : providerScore.ipType || 'unknown';
+    const providerErrorDetail = summarizeProviderErrors(providerScore);
+    const ipTypeDetail = providerUnavailable ? providerErrorDetail : providerScore.ipType || 'unknown';
     items.push(
       checkItem(
         'ip-type',
         'IP 类型',
-        providerUnavailable || providerReasons.has(CheckReason.DATACENTER_IP)
+        providerUnavailable || providerReasons.has(CheckReason.DATACENTER_IP) || providerReasons.has(CheckReason.IP_TYPE_UNCONFIRMED)
           ? 'FAIL'
           : providerScore.ipType === 'residential'
             ? 'PASS'
             : 'WARN',
         ipTypeDetail,
-        providerUnavailable ? CheckReason.PROVIDER_UNAVAILABLE : providerReasons.has(CheckReason.DATACENTER_IP) ? CheckReason.DATACENTER_IP : null
+        providerUnavailable
+          ? CheckReason.PROVIDER_UNAVAILABLE
+          : providerReasons.has(CheckReason.DATACENTER_IP)
+            ? CheckReason.DATACENTER_IP
+            : providerReasons.has(CheckReason.IP_TYPE_UNCONFIRMED)
+              ? CheckReason.IP_TYPE_UNCONFIRMED
+              : null
       )
     );
   }
 
   if (enabledChecks.region) {
     const providerUnavailable = providerReasons.has(CheckReason.PROVIDER_UNAVAILABLE);
+    const providerErrorDetail = summarizeProviderErrors(providerScore);
     items.push(
       checkItem(
         'region',
         '地区',
         providerUnavailable || providerReasons.has(CheckReason.BLOCKED_REGION) ? 'FAIL' : 'PASS',
         providerUnavailable
-          ? '检测源不可用'
+          ? providerErrorDetail
           : providerScore.countryCode
             ? `${providerScore.countryCode} / ${providerScore.regionName || 'unknown'}`
             : 'unknown',
@@ -350,17 +421,32 @@ function buildCheckItems({ targetConfig, externalAccess, providerScore, staticOb
   }
 
   if (enabledChecks.proxyRisk) {
-    const proxyRiskReason = [CheckReason.PROVIDER_UNAVAILABLE, CheckReason.VPN_OR_PROXY_RISK, CheckReason.BLACKLISTED].find((reason) => providerReasons.has(reason));
+    const proxyRiskReason = [
+      CheckReason.PROVIDER_UNAVAILABLE,
+      CheckReason.IP_RISK_DATA_UNAVAILABLE,
+      CheckReason.VPN_OR_PROXY_RISK,
+      CheckReason.IP_SHARED_USERS_RISK,
+      CheckReason.BLACKLISTED
+    ].find((reason) => providerReasons.has(reason));
+    const ping0 = Array.isArray(providerScore.sources) ? providerScore.sources.find((result) => result && result.source === 'ping0.cc' && !result.error) : null;
+    const ping0Detail =
+      ping0 && (typeof ping0.riskScore === 'number' || ping0.sharedUsers)
+        ? `Ping0 风控 ${typeof ping0.riskScore === 'number' ? ping0.riskScore : '--'}${ping0.ping0Purity ? ` / ${ping0.ping0Purity}` : ''}，共享人数 ${ping0.sharedUsers || '--'}`
+        : null;
+    let proxyRiskDetail = ping0Detail || '未发现代理风险';
+    if (proxyRiskReason === CheckReason.PROVIDER_UNAVAILABLE) {
+      proxyRiskDetail = summarizeProviderErrors(providerScore);
+    } else if (proxyRiskReason === CheckReason.IP_RISK_DATA_UNAVAILABLE) {
+      proxyRiskDetail = ping0Detail || summarizeProviderErrors(providerScore) || 'Ping0 未返回风控值或 IP 共享人数';
+    } else if (proxyRiskReason) {
+      proxyRiskDetail = ping0Detail || '检测到代理/VPN/Tor、共享人数或黑名单风险';
+    }
     items.push(
       checkItem(
         'proxy-risk',
         '代理风险',
         proxyRiskReason ? 'FAIL' : 'PASS',
-        proxyRiskReason === CheckReason.PROVIDER_UNAVAILABLE
-          ? '检测源不可用'
-          : proxyRiskReason
-            ? '检测到代理/VPN/Tor 或黑名单风险'
-            : '未发现代理风险',
+        proxyRiskDetail,
         proxyRiskReason || null
       )
     );
@@ -383,7 +469,13 @@ function buildCheckItems({ targetConfig, externalAccess, providerScore, staticOb
   }
 
   if (enabledChecks.webProbe && claudeWeb && claudeWeb.skipped) {
-    items.push(checkItem('claude-web', 'Claude Web', 'SKIPPED', '未配置网页探测', null));
+    const detail =
+      claudeWeb.skipReason === 'PRECHECK_FAILED'
+        ? '前置安全校验未通过，已跳过 Claude Web 探针'
+        : claudeWeb.skipReason === 'PRECHECK_PENDING'
+          ? '等待前置安全校验通过后再探测'
+          : '未配置网页探测';
+    items.push(checkItem('claude-web', 'Claude Web', 'SKIPPED', detail, null));
   } else if (enabledChecks.webProbe) {
     items.push(
       checkItem(
@@ -397,12 +489,15 @@ function buildCheckItems({ targetConfig, externalAccess, providerScore, staticOb
   }
 
   if (enabledChecks.environment) {
+    const webRtcDetail = summarizeBrowserWebRtc(environment && environment.browserWebRtc);
     items.push(
       checkItem(
         'environment',
         '环境一致性',
         itemVerdict(environment && environment.verdict),
-        environment ? `${environment.timeZone || 'unknown'} / ${environment.language || 'unknown'}` : '--',
+        environment
+          ? [environment.timeZone || 'unknown', environment.language || 'unknown', webRtcDetail].filter(Boolean).join(' / ')
+          : '--',
         environment && environment.reasons && environment.reasons[0] ? environment.reasons[0] : null
       )
     );
@@ -442,6 +537,7 @@ class NetworkChecker {
     externalAccessCheck = checkExternalAccess,
     claudeWebProbe = probeClaudeWeb,
     environmentCheck = checkClientEnvironment,
+    browserWebRtcCheck = checkBrowserWebRtcPolicies,
     getTargetConfig = () => ({
       healthCheckHosts: TARGET_HEALTH_HOSTS,
       controlHosts: CLAUDE_CONTROL_HOSTS,
@@ -455,8 +551,42 @@ class NetworkChecker {
     this.externalAccessCheck = externalAccessCheck;
     this.claudeWebProbe = claudeWebProbe;
     this.environmentCheck = environmentCheck;
+    this.browserWebRtcCheck = browserWebRtcCheck;
     this.getTargetConfig = getTargetConfig;
     this.now = now;
+  }
+
+  async collectProviderResults() {
+    const providerResults = await this.providers();
+    const state = this.store.getState();
+    const currentIp = findCurrentProviderIp(providerResults);
+    const ping0 = providerResults.find((result) => result && result.source === PING0_SOURCE);
+
+    if (currentIp && hasRequiredPing0Data(ping0)) {
+      this.store.update({
+        ping0RiskCache: {
+          ipHash: hashIp(currentIp, state.salt),
+          maskedIp: maskIp(currentIp),
+          cachedAt: new Date(this.now()).toISOString(),
+          result: cacheablePing0Result(ping0)
+        }
+      });
+      return providerResults;
+    }
+
+    if (!currentIp || !ping0 || !ping0.error) return providerResults;
+
+    const cache = state.ping0RiskCache || null;
+    const cacheTime = cache && cache.cachedAt ? Date.parse(cache.cachedAt) : 0;
+    const sameIp = cache && cache.ipHash === hashIp(currentIp, state.salt);
+    const fresh = cacheTime && this.now() - cacheTime <= PING0_CACHE_TTL_MS;
+    if (!sameIp || !fresh || !cache.result) return providerResults;
+
+    return providerResults.map((result) =>
+      result && result.source === PING0_SOURCE
+        ? hydrateCachedPing0Result(cache, currentIp, result.error)
+        : result
+    );
   }
 
   async checkStaticResidentialIpPreflight() {
@@ -490,7 +620,7 @@ class NetworkChecker {
       };
     }
 
-    const providerResults = await this.providers();
+    const providerResults = await this.collectProviderResults();
     const providerScore = scoreProviderResults(providerResults);
     const state = this.store.getState();
     const staticObservation = evaluateStaticResidentialIp({
@@ -515,14 +645,11 @@ class NetworkChecker {
     const enabledChecks = enabledChecksFromConfig(targetConfig);
     const shouldCheckTargets = hasTargetChecks(enabledChecks);
     const shouldCheckProviders = hasProviderChecks(enabledChecks);
-    const [externalAccess, providerResults, claudeWeb] = await Promise.all([
+    const [externalAccess, providerResults] = await Promise.all([
       shouldCheckTargets
         ? this.externalAccessCheck(targetConfig.healthCheckHosts || [], targetConfig.controlHosts || [], enabledChecks)
         : Promise.resolve({ ok: true, claudeControlOk: true, results: [], skipped: true }),
-      shouldCheckProviders ? this.providers() : Promise.resolve([]),
-      enabledChecks.webProbe && targetConfig.webProbeUrl
-        ? this.claudeWebProbe(undefined, targetConfig.webProbeUrl)
-        : Promise.resolve({ verdict: NetworkVerdict.PASS, reasons: [], skipped: true })
+      shouldCheckProviders ? this.collectProviderResults() : Promise.resolve([])
     ]);
     const providerScore = shouldCheckProviders
       ? scoreProviderResults(providerResults)
@@ -540,8 +667,13 @@ class NetworkChecker {
         };
     const state = this.store.getState();
     const consistency = state.environmentConsistency || {};
+    const browserWebRtc = enabledChecks.environment ? await this.browserWebRtcCheck() : null;
+    const clientEnvironment = {
+      ...(state.clientEnvironment || {}),
+      browserWebRtc
+    };
     const environment = enabledChecks.environment
-      ? this.environmentCheck(buildEnvironmentCheckInput(state.clientEnvironment || {}, consistency))
+      ? this.environmentCheck(buildEnvironmentCheckInput(clientEnvironment, consistency))
       : { verdict: NetworkVerdict.PASS, reasons: [], disabled: true };
     const binding = enabledChecks.exitBinding
       ? checkExitBinding({ providerScore, state })
@@ -554,7 +686,11 @@ class NetworkChecker {
           salt: state.salt
         })
       : { verdict: NetworkVerdict.PASS, reason: null, skipped: true, disabled: true, nextState: null };
-    const combined = combineVerdicts({
+    let claudeWeb =
+      enabledChecks.webProbe && targetConfig.webProbeUrl
+        ? { verdict: NetworkVerdict.PASS, reasons: [], skipped: true, skipReason: 'PRECHECK_PENDING' }
+        : { verdict: NetworkVerdict.PASS, reasons: [], skipped: true, skipReason: 'NOT_CONFIGURED' };
+    let combined = combineVerdicts({
       externalAccess,
       providerScore,
       staticObservation,
@@ -563,6 +699,21 @@ class NetworkChecker {
       bindingScore: binding,
       enabledChecks
     });
+
+    if (enabledChecks.webProbe && targetConfig.webProbeUrl && combined.verdict === NetworkVerdict.PASS) {
+      claudeWeb = await this.claudeWebProbe(undefined, targetConfig.webProbeUrl);
+      combined = combineVerdicts({
+        externalAccess,
+        providerScore,
+        staticObservation,
+        environmentScore: environment,
+        claudeWebScore: claudeWeb,
+        bindingScore: binding,
+        enabledChecks
+      });
+    } else if (enabledChecks.webProbe && targetConfig.webProbeUrl) {
+      claudeWeb = { verdict: NetworkVerdict.PASS, reasons: [], skipped: true, skipReason: 'PRECHECK_FAILED' };
+    }
 
     const check = {
       checkedAt: new Date(this.now()).toISOString(),
@@ -584,6 +735,9 @@ class NetworkChecker {
         regionName: providerScore.regionName,
         asn: providerScore.asn,
         riskScore: providerScore.riskScore,
+        ping0Purity: providerScore.ping0Purity || null,
+        sharedUsers: providerScore.sharedUsers || null,
+        sharedUsersMax: providerScore.sharedUsersMax || null,
         confidence: providerScore.confidence
       },
       providers: providerResults.map((result) => ({
@@ -594,6 +748,11 @@ class NetworkChecker {
         regionName: result.regionName || null,
         asn: result.asn || null,
         riskScore: result.riskScore || null,
+        ping0Purity: result.ping0Purity || null,
+        sharedUsers: result.sharedUsers || null,
+        sharedUsersMax: typeof result.sharedUsersMax === 'number' ? result.sharedUsersMax : null,
+        cached: result.cached === true,
+        cacheReason: result.cacheReason || null,
         confidence: result.confidence || null
       })),
       targets: {

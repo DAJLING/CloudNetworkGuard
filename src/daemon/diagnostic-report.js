@@ -7,6 +7,11 @@ function sanitizeProvider(provider = {}) {
     regionName: provider.regionName || null,
     asn: provider.asn || null,
     riskScore: typeof provider.riskScore === 'number' ? provider.riskScore : null,
+    ping0Purity: provider.ping0Purity || null,
+    sharedUsers: provider.sharedUsers || null,
+    sharedUsersMax: typeof provider.sharedUsersMax === 'number' ? provider.sharedUsersMax : null,
+    cached: provider.cached === true,
+    cacheReason: provider.cacheReason || null,
     confidence: typeof provider.confidence === 'number' ? provider.confidence : null
   };
 }
@@ -128,12 +133,16 @@ function buildDiagnosticReport(status = {}) {
       regionName: ip.regionName || null,
       asn: ip.asn || null,
       riskScore: typeof ip.riskScore === 'number' ? ip.riskScore : null,
+      ping0Purity: ip.ping0Purity || null,
+      sharedUsers: ip.sharedUsers || null,
+      sharedUsersMax: typeof ip.sharedUsersMax === 'number' ? ip.sharedUsersMax : null,
       confidence: typeof ip.confidence === 'number' ? ip.confidence : null
     },
     providers: Array.isArray(check.providers) ? check.providers.map(sanitizeProvider) : [],
     externalAccess: check.externalAccess || null,
     claudeWeb: check.claudeWeb || null,
     environment: check.environment || null,
+    browserWebRtc: check.environment && check.environment.browserWebRtc ? check.environment.browserWebRtc : null,
     binding: status.binding || check.binding || null,
     firewall: status.firewall || null,
     usage: check.usage || null,

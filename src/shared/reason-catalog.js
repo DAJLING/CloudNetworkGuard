@@ -52,12 +52,33 @@ const reasonCatalog = Object.freeze({
     explanation: '当前出口更像云服务器或机房网络，而不是稳定住宅网络。',
     actions: [action('retry-check', '重新检测'), action('view-report', '查看来源')]
   },
+  [CheckReason.IP_TYPE_UNCONFIRMED]: {
+    priority: 84,
+    severity: 'block',
+    title: 'IP 类型未确认',
+    explanation: '检测源无法确认当前出口是住宅 IP。为避免误放行，守卫会保持阻断。',
+    actions: [action('retry-check', '重新检测'), action('view-report', '查看来源')]
+  },
   [CheckReason.VPN_OR_PROXY_RISK]: {
     priority: 85,
     severity: 'block',
     title: '检测到代理或 VPN 风险',
     explanation: '检测源认为当前出口可能来自代理、VPN 或 Tor 网络。',
     actions: [action('retry-check', '重新检测'), action('view-report', '查看来源')]
+  },
+  [CheckReason.IP_SHARED_USERS_RISK]: {
+    priority: 85,
+    severity: 'block',
+    title: '出口 IP 共享人数过高',
+    explanation: '检测源显示当前出口 IP 可能被过多用户共享，超过了设定的纯净度要求。',
+    actions: [action('retry-check', '重新检测'), action('view-report', '查看来源')]
+  },
+  [CheckReason.IP_RISK_DATA_UNAVAILABLE]: {
+    priority: 88,
+    severity: 'block',
+    title: 'Ping0 风控数据不可用',
+    explanation: '当前未能从 Ping0 拿到风控值、纯净度或 IP 共享人数。缺少这些字段时无法确认出口是否适合安全使用 Claude。',
+    actions: [action('retry-check', '重新检测', 'primary'), action('view-report', '查看来源')]
   },
   [CheckReason.BLACKLISTED]: {
     priority: 85,
@@ -146,6 +167,13 @@ const reasonCatalog = Object.freeze({
     title: '已跳过静态 IP 校验',
     explanation: '你已明确选择不校验静态住宅 IP，其他网络风险检查仍会继续执行。',
     actions: [action('configure-static-ip', '重新配置')]
+  },
+  [CheckReason.CLAUDE_ACCOUNT_RISK_ACK_REQUIRED]: {
+    priority: 85,
+    severity: 'warning',
+    title: '需要确认账号风险',
+    explanation: '未绑定静态住宅 IP 时，使用 Claude 可能因出口变化、代理地区或网络风险触发账号限制。确认风险后才会开启守卫。',
+    actions: [action('configure-static-ip', '配置静态 IP', 'primary'), action('retry-check', '继续开启')]
   },
   [CheckReason.DNS_LEAK_RISK]: {
     priority: 60,

@@ -34,6 +34,19 @@ test('renderer exposes fix guidance surface', () => {
   assert.match(service, /getTopReasonGuidance/);
 });
 
+test('renderer exposes in-flight network check state', () => {
+  const renderer = readProjectFile('src/renderer/renderer.js');
+  const styles = readProjectFile('src/renderer/styles.css');
+  const service = readProjectFile('src/daemon/guard-service.js');
+
+  assert.match(renderer, /networkCheckInFlight/);
+  assert.match(renderer, /setNetworkCheckInFlight/);
+  assert.match(renderer, /检测中\.\.\./);
+  assert.match(renderer, /正在检测网络/);
+  assert.match(styles, /status-icon-loading/);
+  assert.match(service, /checkingNetwork: state\.checkingNetwork === true/);
+});
+
 test('renderer exposes exit binding management controls', () => {
   const html = readProjectFile('src/renderer/index.html');
   const renderer = readProjectFile('src/renderer/renderer.js');
@@ -67,6 +80,17 @@ test('renderer exposes first-run setup wizard shell', () => {
   assert.match(preload, /reopenSetup: \(\) => ipcRenderer\.invoke\('guard:reopen-setup'\)/);
   assert.match(main, /ipcMain\.handle\('guard:complete-setup'/);
   assert.match(main, /ipcMain\.handle\('guard:reopen-setup'/);
+});
+
+test('renderer passes no-static-IP risk acknowledgement when enabling guard', () => {
+  const renderer = readProjectFile('src/renderer/renderer.js');
+  const preload = readProjectFile('src/main/preload.js');
+  const main = readProjectFile('src/main/main.js');
+
+  assert.match(renderer, /confirmNoStaticIpRisk/);
+  assert.match(renderer, /acceptNoStaticIpRisk/);
+  assert.match(preload, /enable: \(mode, options\) => ipcRenderer\.invoke\('guard:enable', mode, options\)/);
+  assert.match(main, /ipcMain\.handle\('guard:enable', async \(_event, mode, options\)/);
 });
 
 test('renderer exposes environment consistency controls', () => {
@@ -155,21 +179,16 @@ test('renderer exposes diagnostic report controls', () => {
   assert.match(service, /buildDiagnosticReport/);
 });
 
-test('renderer exposes periodic monitoring controls', () => {
+test('renderer explains request-time validation replaces periodic monitoring', () => {
   const html = readProjectFile('src/renderer/index.html');
   const renderer = readProjectFile('src/renderer/renderer.js');
-  const preload = readProjectFile('src/main/preload.js');
-  const main = readProjectFile('src/main/main.js');
 
-  assert.match(html, /id="monitoringEnabled"/);
-  assert.match(html, /id="monitoringInterval"/);
-  assert.match(html, /id="saveMonitoring"/);
+  assert.match(html, /请求时校验/);
+  assert.doesNotMatch(html, /id="monitoringEnabled"/);
+  assert.doesNotMatch(html, /id="monitoringInterval"/);
   assert.match(html, /id="monitoringStatus"/);
   assert.match(renderer, /renderMonitoring/);
-  assert.match(renderer, /readMonitoringConfig/);
-  assert.match(renderer, /networkGuard\.setMonitoringConfig/);
-  assert.match(preload, /setMonitoringConfig: \(config\) => ipcRenderer\.invoke\('guard:set-monitoring-config', config\)/);
-  assert.match(main, /ipcMain\.handle\('guard:set-monitoring-config'/);
+  assert.match(renderer, /定时检测已停用/);
 });
 
 test('README documents macOS pf firewall fallback', () => {
@@ -179,5 +198,5 @@ test('README documents macOS pf firewall fallback', () => {
   assert.match(readme, /\/etc\/pf\.anchors\/com\.local\.claude-network-guard/);
   assert.match(readme, /administrator authorization/);
   assert.match(readme, /Targets view/);
-  assert.match(readme, /Periodic monitoring/);
+  assert.match(readme, /Request-time validation/);
 });

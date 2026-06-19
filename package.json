@@ -5,6 +5,7 @@
   "main": "src/main/main.js",
   "private": true,
   "type": "commonjs",
+  "packageManager": "pnpm@11.8.0",
   "engines": {
     "node": ">=22.12.0"
   },
@@ -12,9 +13,11 @@
     "make-icon": "node scripts/make-icon.js",
     "start": "electron .",
     "test": "node --test tests/**/*.test.js",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder",
-    "dist:msi": "electron-builder --win msi"
+    "pack:mac": "electron-builder --mac --dir",
+    "pack:win": "electron-builder --win --dir",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win",
+    "dist:win:msi": "electron-builder --win msi"
   },
   "keywords": [
     "electron",

@@ -66,6 +66,31 @@ test('checkClientEnvironment skips webRtc block when consistency alignment is tr
   assert.equal(result.webRtcCheckSkipped, true);
 });
 
+test('checkClientEnvironment blocks when installed browser WebRTC policy is not disabled', () => {
+  const result = checkClientEnvironment({
+    timeZone: 'America/New_York',
+    language: 'en-US',
+    languages: ['en-US'],
+    webRtcLocalIpCount: 0,
+    browserWebRtc: {
+      supported: true,
+      ok: false,
+      requiredPolicy: 'disable_non_proxied_udp',
+      browsers: [
+        {
+          id: 'chrome',
+          installed: true,
+          policy: null,
+          policyApplied: false
+        }
+      ]
+    }
+  });
+
+  assert.equal(result.verdict, NetworkVerdict.BLOCK);
+  assert.equal(result.reasons.includes(CheckReason.ENVIRONMENT_MISMATCH), true);
+});
+
 test('buildEnvironmentCheckInput reports aligned language without changing Electron locale', () => {
   const merged = buildEnvironmentCheckInput(
     { language: 'zh-CN', languages: ['zh-CN', 'en-US'] },

@@ -13,6 +13,7 @@ function buildEnvironmentCheckInput(clientEnvironment = {}, consistency = {}) {
   const keepChineseInput = consistency.keepChineseInput !== false;
   const merged = {
     ...clientEnvironment,
+    browserWebRtc: clientEnvironment.browserWebRtc || null,
     keepChineseInput,
     trustConsistencyLanguage: keepChineseInput,
     trustConsistencyWebRtc: consistencyActive
@@ -49,6 +50,10 @@ function checkClientEnvironment(environment = {}) {
   if (!trustWebRtc && environment.webRtcLocalIpCount && environment.webRtcLocalIpCount > 0) {
     reasons.push(CheckReason.ENVIRONMENT_MISMATCH);
   }
+  const browserWebRtc = environment.browserWebRtc || null;
+  if (browserWebRtc && browserWebRtc.supported !== false && browserWebRtc.ok === false) {
+    reasons.push(CheckReason.ENVIRONMENT_MISMATCH);
+  }
 
   return {
     verdict: reasons.length ? NetworkVerdict.BLOCK : NetworkVerdict.PASS,
@@ -57,6 +62,7 @@ function checkClientEnvironment(environment = {}) {
     language,
     languages,
     webRtcLocalIpCount: environment.webRtcLocalIpCount || 0,
+    browserWebRtc,
     webRtcCheckSkipped: trustWebRtc && environment.webRtcLocalIpCount > 0,
     languageCheckSkipped: trustLanguage && [language, ...languages].some((item) => BLOCKED_LANGUAGES.includes(item))
   };

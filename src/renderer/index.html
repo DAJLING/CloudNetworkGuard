@@ -319,20 +319,12 @@
           <article class="panel glass-panel settings-card">
             <div class="panel-title compact">
               <div>
-                <span class="eyebrow">Monitoring</span>
-                <h2>周期监控</h2>
+                <span class="eyebrow">Request Gate</span>
+                <h2>请求时校验</h2>
               </div>
-              <button id="saveMonitoring" class="button primary" type="button">保存监控</button>
             </div>
-            <label class="setting-switch">
-              <span><strong>后台定时检测</strong><small>按设定间隔自动运行检查</small></span>
-              <input id="monitoringEnabled" class="switch-input" type="checkbox" />
-            </label>
-            <label class="field compact" for="monitoringInterval">
-              <span>间隔（分钟）</span>
-              <input id="monitoringInterval" class="text-input" type="number" min="1" max="1440" step="1" value="15" />
-            </label>
-            <small id="monitoringStatus" class="field-message" aria-live="polite">尚未启用周期监控。</small>
+            <p class="field-message">后台定时检测已停用。守卫会在电脑发出匹配 Claude / Anthropic 规则的请求时校验出口 IP，再决定是否放行。</p>
+            <small id="monitoringStatus" class="field-message" aria-live="polite">等待目标请求触发校验。</small>
           </article>
 
           <article class="panel glass-panel settings-card settings-card-wide">

@@ -157,9 +157,87 @@ test('applyMacBlock writes anchor, patches pf.conf, and loads pf', async () => {
     assert.match(privilegedWrites[1].content, new RegExp(`load anchor "com\\.local\\.claude-network-guard" from "${pfAnchorPath}"`));
     assert.deepEqual(privilegedCommands[0], [
       ['pfctl', '-nf', pfConfPath],
-      ['pfctl', '-f', pfConfPath],
-      ['pfctl', '-e']
+      ['pfctl', '-f', pfConfPath]
     ]);
+    assert.deepEqual(privilegedCommands[1], [['pfctl', '-e']]);
+  });
+});
+
+test('applyMacBlock batches macOS pf mutation into one privileged script when supported', async () => {
+  await withFirewallEnabled(async () => {
+    const { FirewallManager: TestFirewallManager } = require('../src/daemon/firewall-manager');
+    const pfConfPath = '/tmp/network-guard-pf.conf';
+    const pfAnchorPath = '/tmp/network-guard-anchor';
+    const scripts = [];
+    const manager = new TestFirewallManager({
+      hosts: ['api.anthropic.com'],
+      platform: 'darwin',
+      pfConfPath,
+      pfAnchorPath,
+      fsImpl: {
+        existsSync: (filePath) => filePath === pfConfPath,
+        readFileSync: () => 'set skip on lo0\n'
+      },
+      resolveTargetIpsImpl: async () => ({
+        ips: ['203.0.113.10'],
+        results: [{ host: 'api.anthropic.com', ips: ['203.0.113.10'], errors: [] }]
+      }),
+      macRunner: {
+        runPrivilegedScript: async (script) => {
+          scripts.push(script);
+          return '';
+        }
+      }
+    });
+
+    const result = await manager.applyBlock();
+
+    assert.equal(result.mode, 'PF_BLOCK');
+    assert.equal(scripts.length, 1);
+    assert.match(scripts[0], new RegExp(`mv "\\$anchor_tmp" '${pfAnchorPath}'`));
+    assert.match(scripts[0], new RegExp(`mv "\\$conf_tmp" '${pfConfPath}'`));
+    assert.match(scripts[0], /pfctl -nf/);
+    assert.match(scripts[0], /pfctl -f/);
+    assert.match(scripts[0], /pfctl -e/);
+    assert.match(scripts[0], /pf already enabled/);
+    assert.doesNotMatch(scripts[0], /203\.0\.113\.10/);
+  });
+});
+
+test('applyMacBlock treats already-enabled pf as successful in fallback path', async () => {
+  await withFirewallEnabled(async () => {
+    const { FirewallManager: TestFirewallManager } = require('../src/daemon/firewall-manager');
+    const pfConfPath = '/tmp/network-guard-pf.conf';
+    const pfAnchorPath = '/tmp/network-guard-anchor';
+    const manager = new TestFirewallManager({
+      hosts: ['api.anthropic.com'],
+      platform: 'darwin',
+      pfConfPath,
+      pfAnchorPath,
+      fsImpl: {
+        existsSync: (filePath) => filePath === pfConfPath,
+        readFileSync: () => 'set skip on lo0\n'
+      },
+      resolveTargetIpsImpl: async () => ({
+        ips: ['203.0.113.10'],
+        results: [{ host: 'api.anthropic.com', ips: ['203.0.113.10'], errors: [] }]
+      }),
+      macRunner: {
+        writeFilePrivileged: async () => '',
+        runPrivilegedCommands: async (commands) => {
+          if (commands.length === 1 && commands[0][0] === 'pfctl' && commands[0][1] === '-e') {
+            throw new Error('pfctl: pf already enabled');
+          }
+          return '';
+        }
+      }
+    });
+
+    const result = await manager.applyBlock();
+
+    assert.equal(result.mode, 'PF_BLOCK');
+    assert.equal(result.applied, true);
+    assert.equal(result.lastError, null);
   });
 });
 
@@ -214,6 +292,75 @@ test('clearMacBlock removes anchor block and reloads pf.conf', async () => {
       ['pfctl', '-nf', '/etc/pf.conf'],
       ['pfctl', '-f', '/etc/pf.conf']
     ]);
+  });
+});
+
+test('clearMacBlock skips privileged authorization when no managed pf block exists', async () => {
+  await withFirewallEnabled(async () => {
+    const { FirewallManager: TestFirewallManager } = require('../src/daemon/firewall-manager');
+    const manager = new TestFirewallManager({
+      platform: 'darwin',
+      fsImpl: {
+        existsSync: () => false,
+        readFileSync: () => ''
+      },
+      macRunner: {
+        runPrivilegedScript: async () => {
+          throw new Error('unexpected privileged script');
+        },
+        writeFilePrivileged: async () => {
+          throw new Error('unexpected privileged write');
+        },
+        removeFilePrivileged: async () => {
+          throw new Error('unexpected privileged remove');
+        },
+        runPrivilegedCommands: async () => {
+          throw new Error('unexpected privileged command');
+        }
+      }
+    });
+
+    const result = await manager.clearBlock();
+
+    assert.equal(result.mode, 'PF_NOOP');
+    assert.equal(result.applied, false);
+    assert.equal(result.lastError, null);
+  });
+});
+
+test('clearMacBlock batches macOS pf cleanup into one privileged script when supported', async () => {
+  await withFirewallEnabled(async () => {
+    const { FirewallManager: TestFirewallManager, PF_ANCHOR_PATH } = require('../src/daemon/firewall-manager');
+    const scripts = [];
+    const manager = new TestFirewallManager({
+      platform: 'darwin',
+      fsImpl: {
+        existsSync: (filePath) => filePath === '/etc/pf.conf' || filePath === PF_ANCHOR_PATH,
+        readFileSync: () => [
+          'set skip on lo0',
+          '# ClaudeNetworkGuard PF START',
+          'anchor "com.local.claude-network-guard"',
+          'load anchor "com.local.claude-network-guard" from "/etc/pf.anchors/com.local.claude-network-guard"',
+          '# ClaudeNetworkGuard PF END',
+          ''
+        ].join('\n')
+      },
+      macRunner: {
+        runPrivilegedScript: async (script) => {
+          scripts.push(script);
+          return '';
+        }
+      }
+    });
+
+    const result = await manager.clearBlock();
+
+    assert.equal(result.mode, 'PF_CLEARED');
+    assert.equal(scripts.length, 1);
+    assert.match(scripts[0], /mv "\$conf_tmp" '\/etc\/pf\.conf'/);
+    assert.match(scripts[0], /rm -f '\/etc\/pf\.anchors\/com\.local\.claude-network-guard'/);
+    assert.match(scripts[0], /pfctl -nf/);
+    assert.match(scripts[0], /pfctl -f/);
   });
 });
 

@@ -2,7 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('networkGuard', {
   getStatus: () => ipcRenderer.invoke('guard:get-status'),
-  enable: (mode) => ipcRenderer.invoke('guard:enable', mode),
+  enable: (mode, options) => ipcRenderer.invoke('guard:enable', mode, options),
   disable: () => ipcRenderer.invoke('guard:disable'),
   emergencyRestore: () => ipcRenderer.invoke('guard:emergency-restore'),
   resetExitBinding: () => ipcRenderer.invoke('guard:reset-exit-binding'),

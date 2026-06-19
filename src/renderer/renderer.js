@@ -92,6 +92,7 @@ const els = {
 let currentStatus = null;
 let shouldOpenStaticIpDialogAfterEnable = false;
 let appBusy = false;
+let networkCheckInFlight = false;
 
 const validationCheckDefaults = {
   staticResidentialIp: true,
@@ -145,7 +146,10 @@ const reasonLabels = {
   USAGE_RATE_RISK: '请求频率风险',
   NO_EXTERNAL_ACCESS: '无法访问外网目标',
   DATACENTER_IP: '数据中心 IP',
+  IP_TYPE_UNCONFIRMED: 'IP 类型未确认',
   VPN_OR_PROXY_RISK: '代理 / VPN / Tor 风险',
+  IP_SHARED_USERS_RISK: 'IP 共享人数过高',
+  IP_RISK_DATA_UNAVAILABLE: 'Ping0 风控数据不可用',
   BLACKLISTED: '黑名单命中',
   BLOCKED_REGION: '被封锁区域',
   IP_CHANGED: 'IP 已变化',
@@ -153,6 +157,7 @@ const reasonLabels = {
   STATIC_RESIDENTIAL_IP_REQUIRED: '未配置静态住宅 IP',
   STATIC_RESIDENTIAL_IP_MISMATCH: '静态住宅 IP 不匹配',
   STATIC_RESIDENTIAL_IP_SKIPPED: '静态住宅 IP 校验已跳过',
+  CLAUDE_ACCOUNT_RISK_ACK_REQUIRED: '需要确认 Claude 账号风险',
   DNS_LEAK_RISK: 'DNS 泄露风险',
   PROVIDER_UNAVAILABLE: '检测源不可用',
   FIREWALL_ERROR: '防火墙兜底失败'
@@ -173,6 +178,7 @@ const userErrorMessages = {
   FIREWALL_ERROR: '防火墙兜底失败，请以管理员身份运行后重试。',
   MONITORING_INTERVAL_INVALID: '监控间隔需在 1 到 1440 分钟之间。',
   MONITORING_FAILED: '周期监控执行失败，请稍后重试。',
+  CLAUDE_ACCOUNT_RISK_ACK_REQUIRED: '未绑定静态住宅 IP，开启前需要确认 Claude 账号风险。',
   STATIC_RESIDENTIAL_IP_REQUIRED: '请填写静态住宅 IP，或选择不校验。',
   INVALID_STATIC_RESIDENTIAL_IP: '静态住宅 IP 无效，请重新填写 IPv4 地址。',
   VALIDATION_SERVICE_REQUIRED: '请启用 Claude / Anthropic 校验，或使用自定义 Claude 主机。',
@@ -377,6 +383,19 @@ function setBusy(isBusy) {
   applyPrimaryActionAvailability();
 }
 
+function isNetworkChecking(status = currentStatus) {
+  return networkCheckInFlight || Boolean(status && status.checkingNetwork);
+}
+
+function setNetworkCheckInFlight(isChecking) {
+  networkCheckInFlight = isChecking;
+  if (currentStatus) {
+    render(currentStatus);
+  } else {
+    applyPrimaryActionAvailability();
+  }
+}
+
 function setHelp(message, tone = 'neutral') {
   els.staticIpHelp.textContent = message;
   els.staticIpHelp.className = tone === 'error' ? 'field-message error' : tone === 'success' ? 'field-message success' : 'field-message';
@@ -530,6 +549,7 @@ function applyPrimaryActionAvailability() {
 
   if (els.checkNow) {
     els.checkNow.disabled = appBusy || !hasEnabledChecks;
+    els.checkNow.textContent = isNetworkChecking(status) ? '检测中...' : '立即检测';
     els.checkNow.title = disabledReason;
   }
   if (els.guardToggle) {
@@ -635,6 +655,20 @@ function readValidationInputFromForm() {
 }
 
 function renderCheckItems(items = []) {
+  if (isNetworkChecking()) {
+    els.checkItems.innerHTML = `
+      <div class="check-row pending check-row-live">
+        <span class="status-icon status-icon-loading" aria-label="检测中"></span>
+        <span class="check-copy">
+          <strong>正在检测网络</strong>
+          <small>正在确认 DNS、连接、出口 IP 和浏览器环境。</small>
+        </span>
+        <span class="check-result">检测中</span>
+      </div>
+    `;
+    return;
+  }
+
   if (!items.length) {
     const validation = currentStatus && currentStatus.targetConfig ? currentStatus.targetConfig.validation : {};
     els.checkItems.innerHTML = hasEnabledValidationChecks(validation)
@@ -686,17 +720,13 @@ function renderLogs(logs = []) {
 
 function renderMonitoring(monitoring = {}) {
   if (!els.monitoringStatus) return;
-  const enabled = monitoring.enabled === true;
-  if (els.monitoringEnabled) els.monitoringEnabled.checked = enabled;
+  if (els.monitoringEnabled) els.monitoringEnabled.checked = false;
   if (els.monitoringInterval) els.monitoringInterval.value = String(monitoring.intervalMinutes || 15);
-
-  const parts = [enabled ? `已启用，每 ${monitoring.intervalMinutes || 15} 分钟检测` : '尚未启用周期监控'];
-  if (monitoring.running) parts.push('正在检测');
-  if (monitoring.lastRunAt) parts.push(`上次运行 ${formatDate(monitoring.lastRunAt)}`);
-  if (monitoring.lastResult && monitoring.lastResult.verdict) parts.push(`结果 ${labelVerdict(monitoring.lastResult.verdict)}`);
-  if (monitoring.lastError) parts.push(`错误 ${formatUserError(monitoring.lastError, '周期监控执行失败。')}`);
+  const parts = ['定时检测已停用'];
+  if (monitoring.lastRunAt) parts.push(`最后一次旧监控 ${formatDate(monitoring.lastRunAt)}`);
+  if (monitoring.lastResult && monitoring.lastResult.verdict) parts.push(`旧结果 ${labelVerdict(monitoring.lastResult.verdict)}`);
   els.monitoringStatus.textContent = parts.join(' · ');
-  els.monitoringStatus.className = monitoring.lastError ? 'field-message error' : enabled ? 'field-message success' : 'field-message';
+  els.monitoringStatus.className = 'field-message';
 }
 
 function readMonitoringConfig() {
@@ -736,6 +766,12 @@ function runGuidanceAction(actionId) {
   } else if (actionId === 'restore-network') {
     els.emergencyRestore.click();
   } else if (actionId === 'fix-environment') {
+    setActiveView('settings');
+    if (els.applyEnvironmentConsistency.disabled) {
+      els.environmentConsistencyStatus.textContent = '当前平台暂不支持自动对齐环境。';
+      els.environmentConsistencyStatus.className = 'field-message error';
+      return;
+    }
     els.applyEnvironmentConsistency.click();
   } else if (actionId === 'configure-static-ip' || actionId === 'skip-static-ip') {
     openStaticIpDialog();
@@ -846,13 +882,25 @@ async function persistEnvironmentConsistencyConfig() {
 }
 
 async function runPostApplyCheck() {
+  setNetworkCheckInFlight(true);
   await reportEnvironment();
-  await window.networkGuard.checkNow();
-  await refresh();
+  try {
+    await window.networkGuard.checkNow();
+    await refresh();
+  } finally {
+    setNetworkCheckInFlight(false);
+  }
 }
 
 function renderGuidance(guidance = {}) {
   if (!els.fixTitle || !els.fixExplanation || !els.fixActions) return;
+  if (isNetworkChecking()) {
+    els.fixTitle.textContent = '正在检测网络';
+    els.fixExplanation.textContent = '检测完成后会自动更新检测清单和修复建议。';
+    els.fixActions.innerHTML = '';
+    return;
+  }
+
   els.fixTitle.textContent = guidance.title || '等待检测结果';
   els.fixExplanation.textContent = guidance.explanation || '检测完成后会显示最重要的阻断原因和下一步建议。';
   els.fixActions.innerHTML = '';
@@ -924,6 +972,7 @@ function render(status) {
   const verdict = check ? check.verdict : 'UNKNOWN';
   const displayVerdict = enabled ? verdict : 'DISABLED';
   const ip = check && check.ip ? check.ip : {};
+  const checking = isNetworkChecking(status);
 
   els.summary.textContent = enabled
     ? '守卫已开启，目标流量会先经过网络状态矩阵，验证通过后放行。'
@@ -934,7 +983,7 @@ function render(status) {
   els.traffic.textContent = enabled ? (check && check.allowTargetTraffic ? '允许' : '阻断') : '放行';
   els.ip.textContent = ip.maskedIp || '未检测';
   els.risk.textContent = typeof ip.riskScore === 'number' ? `风险分 ${ip.riskScore}` : '风险分 --';
-  els.checkedAt.textContent = check ? formatDate(check.checkedAt) : '尚未检测';
+  els.checkedAt.textContent = checking ? '检测中...' : check ? formatDate(check.checkedAt) : '尚未检测';
   els.region.textContent = ip.countryCode ? `${ip.countryCode} / ${ip.regionName || 'unknown'}` : '--';
   els.launchAtLogin.checked = Boolean(status.launchAtLogin);
   const proxy = status.proxy || {};
@@ -994,6 +1043,24 @@ function closeStaticIpDialog() {
   els.staticIpDialog.hidden = true;
 }
 
+function hasBoundStaticResidentialIp(config = currentStatus && currentStatus.targetConfig) {
+  const value = String((config && config.staticResidentialIp) || '').trim();
+  return Boolean(value && value !== '0.0.0.0');
+}
+
+function confirmNoStaticIpRisk() {
+  return window.confirm(
+    [
+      '未绑定静态住宅 IP 时继续使用 Claude 存在账号风险。',
+      '',
+      '守卫会在命中 Claude / Anthropic 请求时校验出口地区；如果出口地区不在 Claude 服务范围内，会阻断请求。',
+      '但出口 IP 变化、代理质量或地区误判仍可能触发 Claude 账号限制。',
+      '',
+      '是否确认风险并开启守卫？'
+    ].join('\n')
+  );
+}
+
 async function saveStaticIp(value, { allowEmpty = true } = {}) {
   const error = validateStaticIpInput(value, allowEmpty);
   if (error) throw new Error(error);
@@ -1004,10 +1071,19 @@ async function enableGuardWithStaticIpHandling() {
   setBusy(true);
   try {
     await reportEnvironment();
-    const status = await window.networkGuard.enable('AUTO');
+    const acceptNoStaticIpRisk = !hasBoundStaticResidentialIp() && confirmNoStaticIpRisk();
+    if (!hasBoundStaticResidentialIp() && !acceptNoStaticIpRisk) {
+      setHelp('已取消开启守卫。绑定静态住宅 IP 后可减少 Claude 账号风险。');
+      return;
+    }
+    const status = await window.networkGuard.enable('AUTO', { acceptNoStaticIpRisk });
     render(status);
-    if (status.guardState !== 'ENABLED' && status.lastCheck && status.lastCheck.allowTargetTraffic !== true) {
-      setHelp('开启守卫前网络校验未通过，守卫未开启。请先看检测清单里失败项（与「环境对齐」无关时多为 DNS/TCP/Claude 连通性）。', 'error');
+    if (status.actionRequired && status.actionRequired.type === 'CLAUDE_ACCOUNT_RISK_ACK_REQUIRED') {
+      setHelp('开启守卫前需要确认 Claude 账号风险。', 'error');
+    } else if (status.guardState === 'ENABLED') {
+      setHelp('守卫已开启。命中 Claude / Anthropic 请求时会先校验出口 IP。', 'success');
+    } else if (status.guardState !== 'ENABLED' && status.lastCheck && status.lastCheck.allowTargetTraffic !== true) {
+      setHelp('开启守卫未完成，请查看检测清单里的失败项。', 'error');
     }
     if (status.actionRequired && status.actionRequired.type === 'STATIC_RESIDENTIAL_IP_REQUIRED') {
       shouldOpenStaticIpDialogAfterEnable = true;
@@ -1074,11 +1150,16 @@ els.applyEnvironmentConsistency.addEventListener('click', async () => {
     if (result.status) render(result.status);
     if (result.ok && result.restartRequired) {
       els.environmentConsistencyStatus.textContent =
-        '对齐完成，应用约 2 秒后自动重启并重新检测；Chrome/Edge 重启后会应用浏览器策略。';
+        '对齐完成，应用约 2 秒后自动重启并重新检测；重新打开 Chrome/Edge 后会应用浏览器策略。';
       els.environmentConsistencyStatus.className = 'field-message success';
       return;
     }
     if (!result.ok) {
+      const failed = formatConsistencySteps(result.steps);
+      els.environmentConsistencyStatus.textContent = isBrowserRunningPreflight(result.steps)
+        ? `请先完全关闭 ${formatRunningBrowsers(result.steps.preflight.running)}，再重试一键对齐。`
+        : `对齐未完全成功：${failed.join('；') || '请查看日志'}`;
+      els.environmentConsistencyStatus.className = 'field-message error';
       return;
     }
     await runPostApplyCheck();
@@ -1144,12 +1225,23 @@ for (const input of [els.deriveFromExitIp, els.keepChineseInput, els.profileOver
 }
 
 els.checkNow.addEventListener('click', async () => {
+  if (isNetworkChecking()) return;
+  setNetworkCheckInFlight(true);
   setBusy(true);
   try {
     await reportEnvironment();
-    await window.networkGuard.checkNow();
+    const check = await window.networkGuard.checkNow();
     await refresh();
+    setHelp(
+      check && check.allowTargetTraffic === true
+        ? '检测完成，当前网络可放行。'
+        : '检测完成，请查看检测清单和修复建议。',
+      check && check.allowTargetTraffic === true ? 'success' : 'neutral'
+    );
+  } catch (error) {
+    setHelp(formatUserError(error, '检测失败，请稍后重试。'), 'error');
   } finally {
+    setNetworkCheckInFlight(false);
     setBusy(false);
   }
 });
@@ -1218,9 +1310,8 @@ if (els.saveMonitoring) {
   els.saveMonitoring.addEventListener('click', async () => {
     setBusy(true);
     try {
-      const config = readMonitoringConfig();
-      render(await window.networkGuard.setMonitoringConfig(config));
-      setHelp('周期监控设置已保存。', 'success');
+      render(await window.networkGuard.setMonitoringConfig({ enabled: false }));
+      setHelp('后台定时检测已停用；将改为请求时校验。', 'success');
     } catch (error) {
       if (els.monitoringStatus) {
         els.monitoringStatus.textContent = formatUserError(error, '监控设置保存失败。');

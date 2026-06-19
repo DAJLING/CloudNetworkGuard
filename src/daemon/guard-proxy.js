@@ -11,7 +11,7 @@ class GuardProxy {
     this.host = host;
     this.getStatus = getStatus;
     this.getTargetRules = getTargetRules || (() => undefined);
-    this.onTargetRequest = onTargetRequest || (() => ({ block: false, reasons: [] }));
+    this.onTargetRequest = onTargetRequest || (async () => ({ block: false, reasons: [] }));
     this.emitEvent = emitEvent;
     this.server = http.createServer(this.handleHttp.bind(this));
     this.server.on('connect', this.handleConnect.bind(this));
@@ -42,15 +42,10 @@ class GuardProxy {
     );
   }
 
-  evaluateTargetRequest(host) {
+  async evaluateTargetRequest(host) {
     if (!isGuardedTarget(host, this.getTargetRules())) return { block: false, reasons: [] };
-    if (this.shouldBlock(host)) {
-      const status = this.getStatus();
-      return {
-        block: true,
-        reasons: status.lastCheck ? status.lastCheck.reasons : []
-      };
-    }
+    const status = this.getStatus();
+    if (status.guardState !== GuardState.ENABLED) return { block: false, reasons: [] };
     return this.onTargetRequest(host);
   }
 
@@ -66,9 +61,13 @@ class GuardProxy {
     });
   }
 
-  handleConnect(request, clientSocket, head) {
+  async handleConnect(request, clientSocket, head) {
     const [host, port = '443'] = request.url.split(':');
-    const decision = this.evaluateTargetRequest(host);
+    const decision = await this.evaluateTargetRequest(host).catch((error) => ({
+      block: true,
+      reasons: ['PROVIDER_UNAVAILABLE'],
+      error: error.message || 'REQUEST_CHECK_FAILED'
+    }));
     if (decision.block) {
       this.emitBlocked(host, 'CONNECT');
       clientSocket.write('HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nClaude Network Guard blocked this request.');
@@ -87,7 +86,7 @@ class GuardProxy {
     clientSocket.on('error', () => upstream.destroy());
   }
 
-  handleHttp(clientRequest, clientResponse) {
+  async handleHttp(clientRequest, clientResponse) {
     let targetUrl;
     try {
       targetUrl = new URL(clientRequest.url);
@@ -97,7 +96,11 @@ class GuardProxy {
       return;
     }
 
-    const decision = this.evaluateTargetRequest(targetUrl.hostname);
+    const decision = await this.evaluateTargetRequest(targetUrl.hostname).catch((error) => ({
+      block: true,
+      reasons: ['PROVIDER_UNAVAILABLE'],
+      error: error.message || 'REQUEST_CHECK_FAILED'
+    }));
     if (decision.block) {
       this.emitBlocked(targetUrl.hostname, targetUrl.protocol);
       clientResponse.writeHead(403, { 'content-type': 'text/plain' });

@@ -3,6 +3,25 @@ const assert = require('node:assert/strict');
 const { scoreProviderResults, combineVerdicts } = require('../src/daemon/scoring');
 const { CheckReason, NetworkVerdict } = require('../src/shared/constants');
 
+function safePing0(overrides = {}) {
+  return {
+    source: 'ping0.cc',
+    ip: '203.0.113.10',
+    ipType: 'residential',
+    countryCode: 'US',
+    regionName: 'United States',
+    isProxy: false,
+    isVpn: false,
+    isTor: false,
+    riskScore: 0,
+    ping0Purity: '低风险',
+    sharedUsers: '1 - 10 (安全)',
+    sharedUsersMax: 10,
+    confidence: 45,
+    ...overrides
+  };
+}
+
 test('scoreProviderResults blocks datacenter and proxy risk', () => {
   const score = scoreProviderResults([
     {
@@ -14,12 +33,34 @@ test('scoreProviderResults blocks datacenter and proxy risk', () => {
       isTor: false,
       riskScore: 80,
       confidence: 50
-    }
+    },
+    safePing0({ ipType: 'hosting', isProxy: true, riskScore: 80 })
   ]);
 
   assert.equal(score.verdict, NetworkVerdict.BLOCK);
   assert.equal(score.reasons.includes(CheckReason.DATACENTER_IP), true);
   assert.equal(score.reasons.includes(CheckReason.VPN_OR_PROXY_RISK), true);
+});
+
+test('scoreProviderResults lets Ping0 residential classification override hosting hints', () => {
+  const score = scoreProviderResults([
+    {
+      source: 'ip-api.com',
+      ip: '198.51.100.20',
+      ipType: 'hosting',
+      countryCode: 'US',
+      regionName: 'United States',
+      isProxy: false,
+      isVpn: false,
+      isTor: false,
+      riskScore: 15,
+      confidence: 25
+    },
+    safePing0({ ip: '198.51.100.20', ipType: 'residential' })
+  ]);
+
+  assert.equal(score.ipType, 'residential');
+  assert.equal(score.reasons.includes(CheckReason.DATACENTER_IP), false);
 });
 
 test('scoreProviderResults blocks mainland China, Hong Kong, and Macau regions', () => {
@@ -36,12 +77,43 @@ test('scoreProviderResults blocks mainland China, Hong Kong, and Macau regions',
         isTor: false,
         riskScore: 0,
         confidence: 90
-      }
+      },
+      safePing0()
     ]);
 
     assert.equal(score.verdict, NetworkVerdict.BLOCK);
     assert.equal(score.reasons.includes(CheckReason.BLOCKED_REGION), true);
   }
+});
+
+test('scoreProviderResults blocks country codes outside Claude supported regions', () => {
+  for (const countryCode of ['RU', 'CF', 'NI']) {
+    const score = scoreProviderResults([
+      {
+        source: 'fixture',
+        ip: '203.0.113.12',
+        ipType: 'residential',
+        countryCode,
+        regionName: countryCode,
+        isProxy: false,
+        isVpn: false,
+        isTor: false,
+        riskScore: 0,
+        confidence: 90
+      },
+      safePing0()
+    ]);
+
+    assert.equal(score.verdict, NetworkVerdict.BLOCK);
+    assert.equal(score.reasons.includes(CheckReason.BLOCKED_REGION), true);
+  }
+});
+
+test('scoreProviderResults allows official Mariana Islands region', () => {
+  const score = scoreProviderResults([safePing0({ countryCode: 'MP', regionName: 'Mariana Islands' })]);
+
+  assert.equal(score.verdict, NetworkVerdict.PASS);
+  assert.equal(score.reasons.includes(CheckReason.BLOCKED_REGION), false);
 });
 
 test('scoreProviderResults blocks unknown region only when no source has a known region', () => {
@@ -56,7 +128,8 @@ test('scoreProviderResults blocks unknown region only when no source has a known
       isTor: false,
       riskScore: 0,
       confidence: 90
-    }
+    },
+    safePing0({ countryCode: 'unknown', regionName: 'unknown' })
   ]);
 
   assert.equal(unknownOnly.verdict, NetworkVerdict.BLOCK);
@@ -85,10 +158,124 @@ test('scoreProviderResults blocks unknown region only when no source has a known
       isTor: false,
       riskScore: 0,
       confidence: 50
-    }
+    },
+    safePing0()
   ]);
 
   assert.equal(knownFallback.reasons.includes(CheckReason.BLOCKED_REGION), false);
+});
+
+test('scoreProviderResults blocks when Ping0 risk data is missing', () => {
+  const noPing0 = scoreProviderResults([
+    {
+      source: 'fixture',
+      ip: '203.0.113.20',
+      ipType: 'residential',
+      countryCode: 'US',
+      regionName: 'United States',
+      isProxy: false,
+      isVpn: false,
+      isTor: false,
+      riskScore: 0,
+      confidence: 90
+    }
+  ]);
+
+  const ping0Error = scoreProviderResults([
+    {
+      source: 'fixture',
+      ip: '203.0.113.20',
+      ipType: 'residential',
+      countryCode: 'US',
+      regionName: 'United States',
+      isProxy: false,
+      isVpn: false,
+      isTor: false,
+      riskScore: 0,
+      confidence: 90
+    },
+    { source: 'ping0.cc', error: 'CAPTCHA_REQUIRED' }
+  ]);
+
+  const partialPing0 = scoreProviderResults([safePing0({ riskScore: null })]);
+
+  assert.equal(noPing0.verdict, NetworkVerdict.BLOCK);
+  assert.equal(noPing0.reasons.includes(CheckReason.IP_RISK_DATA_UNAVAILABLE), true);
+  assert.equal(ping0Error.reasons.includes(CheckReason.IP_RISK_DATA_UNAVAILABLE), true);
+  assert.equal(partialPing0.reasons.includes(CheckReason.IP_RISK_DATA_UNAVAILABLE), true);
+});
+
+test('scoreProviderResults blocks when IP type is unknown', () => {
+  const score = scoreProviderResults([safePing0({ ipType: 'unknown' })]);
+
+  assert.equal(score.verdict, NetworkVerdict.BLOCK);
+  assert.equal(score.reasons.includes(CheckReason.IP_TYPE_UNCONFIRMED), true);
+});
+
+test('scoreProviderResults blocks ping0 risk scores above purity threshold', () => {
+  const score = scoreProviderResults([
+    {
+      source: 'ping0.cc',
+      ip: '198.51.100.3',
+      ipType: 'residential',
+      countryCode: 'US',
+      regionName: 'United States',
+      isProxy: false,
+      isVpn: false,
+      isTor: false,
+      riskScore: 31,
+      sharedUsers: '10 - 100 (一般)',
+      sharedUsersMax: 100,
+      confidence: 45
+    }
+  ]);
+
+  assert.equal(score.verdict, NetworkVerdict.BLOCK);
+  assert.equal(score.reasons.includes(CheckReason.VPN_OR_PROXY_RISK), true);
+});
+
+test('scoreProviderResults blocks ping0 shared user ranges above threshold', () => {
+  const score = scoreProviderResults([
+    {
+      source: 'ping0.cc',
+      ip: '198.51.100.4',
+      ipType: 'residential',
+      countryCode: 'US',
+      regionName: 'United States',
+      isProxy: false,
+      isVpn: false,
+      isTor: false,
+      riskScore: 30,
+      sharedUsers: '100 - 1000 (风险)',
+      sharedUsersMax: 1000,
+      confidence: 45
+    }
+  ]);
+
+  assert.equal(score.verdict, NetworkVerdict.BLOCK);
+  assert.equal(score.reasons.includes(CheckReason.IP_SHARED_USERS_RISK), true);
+});
+
+test('scoreProviderResults passes ping0 risk and sharing at threshold', () => {
+  const score = scoreProviderResults([
+    {
+      source: 'ping0.cc',
+      ip: '198.51.100.5',
+      ipType: 'residential',
+      countryCode: 'US',
+      regionName: 'United States',
+      isProxy: false,
+      isVpn: false,
+      isTor: false,
+      riskScore: 30,
+      sharedUsers: '10 - 100 (一般)',
+      sharedUsersMax: 100,
+      confidence: 45
+    }
+  ]);
+
+  assert.equal(score.verdict, NetworkVerdict.PASS);
+  assert.deepEqual(score.reasons, []);
 });
 
 test('combineVerdicts blocks while static residential IP is still observing', () => {

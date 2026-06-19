@@ -73,7 +73,7 @@ test('apply fails fast when browsers are running and browser language changes ar
   assert.equal(result.steps.preflight.error, 'BROWSER_RUNNING');
 });
 
-test('windows apply allows running browsers when keeping Chinese input', async () => {
+test('windows apply blocks running browsers even when keeping Chinese input', async () => {
   let applied = false;
   const service = new EnvironmentConsistencyService({
     dataDir: '/tmp',
@@ -104,8 +104,9 @@ test('windows apply allows running browsers when keeping Chinese input', async (
     config: { deriveFromExitIp: true, keepChineseInput: true, profileOverride: {} }
   });
 
-  assert.equal(applied, true);
-  assert.equal(result.ok, true);
+  assert.equal(applied, false);
+  assert.equal(result.ok, false);
+  assert.equal(result.steps.preflight.error, 'BROWSER_RUNNING');
 });
 
 test('restore fails without backup', async () => {

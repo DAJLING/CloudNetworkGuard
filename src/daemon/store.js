@@ -55,8 +55,10 @@ class Store {
         lastRestoreResult: null,
         pendingPostApplyCheck: false
       },
+      claudeRiskAcceptedAt: null,
       actionRequired: null,
       lastCheck: null,
+      ping0RiskCache: null,
       recovery: {
         lastResult: null
       },

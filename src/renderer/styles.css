@@ -650,6 +650,21 @@ code {
   color: var(--amber);
 }
 
+.status-icon-loading::before {
+  content: "";
+  width: 15px;
+  height: 15px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 999px;
+  animation: spin 0.8s linear infinite;
+}
+
+.check-row-live {
+  border-color: rgba(198, 111, 46, 0.28);
+  background: rgba(255, 255, 255, 0.68);
+}
+
 .check-row.skipped .status-icon {
   background: var(--gray-soft);
   color: var(--soft);
@@ -933,6 +948,12 @@ code {
   border-radius: var(--radius);
   padding: 18px;
   background: rgba(255, 255, 255, 0.46);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .log-row {

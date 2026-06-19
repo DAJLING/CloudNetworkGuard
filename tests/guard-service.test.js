@@ -5,8 +5,38 @@ const path = require('path');
 const fs = require('fs');
 const { GuardService, shouldUseSystemProxy } = require('../src/daemon/guard-service');
 const { Store } = require('../src/daemon/store');
-const { GuardMode, GuardState } = require('../src/shared/constants');
+const { CheckReason, GuardMode, GuardState } = require('../src/shared/constants');
 const { DEFAULT_VALIDATION_CHECKS } = require('../src/daemon/target-config');
+
+function safePing0(overrides = {}) {
+  return {
+    source: 'ping0.cc',
+    ip: '203.0.113.10',
+    ipType: 'residential',
+    countryCode: 'US',
+    regionName: 'United States',
+    isProxy: false,
+    isVpn: false,
+    isTor: false,
+    riskScore: 0,
+    ping0Purity: '低风险',
+    sharedUsers: '1 - 10 (安全)',
+    sharedUsersMax: 10,
+    confidence: 45,
+    ...overrides
+  };
+}
+
+function passCheck(overrides = {}) {
+  return {
+    checkedAt: new Date().toISOString(),
+    verdict: 'PASS',
+    reasons: [],
+    allowTargetTraffic: true,
+    checkItems: [],
+    ...overrides
+  };
+}
 
 test('GuardService persists enable and disable states without applying system proxy when skipped', async () => {
   process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY = '1';
@@ -16,26 +46,14 @@ test('GuardService persists enable and disable states without applying system pr
   service.setStaticResidentialIp('0.0.0.0');
   service.firewallManager.applyBlock = async () => ({ mode: 'BLOCK', rules: [{ name: 'fixture', remoteIp: '203.0.113.10' }] });
   service.firewallManager.clearBlock = async () => ({ mode: 'CLEARED', rules: [] });
-  service.checker.providers = async () => [
-    {
-      source: 'fixture',
-      ip: '203.0.113.10',
-      ipType: 'residential',
-      countryCode: 'US',
-      regionName: 'United States',
-      isProxy: false,
-      isVpn: false,
-      isTor: false,
-      riskScore: 0,
-      confidence: 90
-    }
-  ];
+  service.checker.providers = async () => [safePing0()];
   service.checker.externalAccessCheck = async () => ({ ok: true, results: [] });
   service.checker.claudeWebProbe = async () => ({ verdict: 'PASS', reasons: [], status: 200 });
+  service.checker.browserWebRtcCheck = async () => ({ supported: true, ok: true, requiredPolicy: 'disable_non_proxied_udp', browsers: [] });
   service.checker.environmentCheck = () => ({ verdict: 'PASS', reasons: [], timeZone: 'America/New_York', language: 'en-US' });
 
   service.checker.now = () => 1000;
-  const enabled = await service.enableGuard();
+  const enabled = await service.enableGuard('AUTO', { acceptNoStaticIpRisk: true });
   assert.equal(enabled.guardState, GuardState.ENABLED);
   assert.equal(enabled.firewall.mode, 'CLEARED');
 
@@ -46,7 +64,7 @@ test('GuardService persists enable and disable states without applying system pr
   delete process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY;
 });
 
-test('GuardService keeps guard disabled when enable-time network check fails', async () => {
+test('GuardService runs full network check before enabling when risk is accepted', async () => {
   process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY = '1';
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
   const store = new Store(path.join(tmp, 'state.json'));
@@ -54,21 +72,19 @@ test('GuardService keeps guard disabled when enable-time network check fails', a
   service.setStaticResidentialIp('0.0.0.0');
   service.firewallManager.applyBlock = async () => ({ mode: 'BLOCK', rules: [] });
   service.firewallManager.clearBlock = async () => ({ mode: 'CLEARED', rules: [] });
-  service.checker.checkNow = async () => ({
-    checkedAt: new Date().toISOString(),
-    verdict: 'BLOCK',
-    reasons: ['DNS_CHECK_FAILED'],
-    allowTargetTraffic: false,
-    checkItems: []
-  });
+  let checkCalls = 0;
+  service.checker.checkNow = async () => {
+    checkCalls += 1;
+    return passCheck();
+  };
 
-  const status = await service.enableGuard();
-  assert.equal(status.guardState, GuardState.DISABLED);
-  assert.equal(status.lastCheck.allowTargetTraffic, false);
+  const status = await service.enableGuard('AUTO', { acceptNoStaticIpRisk: true });
+  assert.equal(status.guardState, GuardState.ENABLED);
+  assert.equal(checkCalls, 1);
   delete process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY;
 });
 
-test('GuardService runs network check before applying firewall block on enable', async () => {
+test('GuardService keeps guard disabled when preflight check fails', async () => {
   process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY = '1';
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
   const store = new Store(path.join(tmp, 'state.json'));
@@ -86,21 +102,18 @@ test('GuardService runs network check before applying firewall block on enable',
   };
   service.checker.checkNow = async () => {
     events.push('check');
-    assert.equal(store.getState().checkingNetwork, true);
-    return {
-      checkedAt: new Date().toISOString(),
-      verdict: 'PASS',
-      reasons: [],
-      allowTargetTraffic: true,
-      checkItems: []
-    };
+    return passCheck({
+      verdict: 'BLOCK',
+      reasons: ['IP_RISK_DATA_UNAVAILABLE'],
+      allowTargetTraffic: false
+    });
   };
 
-  const status = await service.enableGuard();
-  assert.equal(status.guardState, GuardState.ENABLED);
+  const status = await service.enableGuard('AUTO', { acceptNoStaticIpRisk: true });
+  assert.equal(status.guardState, GuardState.DISABLED);
   assert.equal(events.includes('check'), true);
   assert.equal(events.includes('apply'), false);
-  assert.ok(events.filter((item) => item === 'clear').length >= 1);
+  assert.equal(events.includes('clear'), true);
   assert.equal(store.getState().checkingNetwork, false);
   delete process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY;
 });
@@ -128,22 +141,10 @@ test('GuardService does not enable Windows system proxy by default', async () =>
   service.setStaticResidentialIp('0.0.0.0');
   service.firewallManager.applyBlock = async () => ({ mode: 'BLOCK', rules: [{ name: 'fixture', remoteIp: '203.0.113.10' }] });
   service.firewallManager.clearBlock = async () => ({ mode: 'CLEARED', rules: [] });
-  service.checker.providers = async () => [
-    {
-      source: 'fixture',
-      ip: '203.0.113.10',
-      ipType: 'residential',
-      countryCode: 'US',
-      regionName: 'United States',
-      isProxy: false,
-      isVpn: false,
-      isTor: false,
-      riskScore: 0,
-      confidence: 90
-    }
-  ];
+  service.checker.providers = async () => [safePing0()];
   service.checker.externalAccessCheck = async () => ({ ok: true, results: [] });
   service.checker.claudeWebProbe = async () => ({ verdict: 'PASS', reasons: [], status: 200 });
+  service.checker.browserWebRtcCheck = async () => ({ supported: true, ok: true, requiredPolicy: 'disable_non_proxied_udp', browsers: [] });
   service.checker.environmentCheck = () => ({ verdict: 'PASS', reasons: [], timeZone: 'America/New_York', language: 'zh-CN' });
 
   let enableCalled = false;
@@ -153,7 +154,7 @@ test('GuardService does not enable Windows system proxy by default', async () =>
   };
   service.proxyManager.disable = async () => ({ applied: true, platform: 'win32' });
 
-  const enabled = await service.enableGuard();
+  const enabled = await service.enableGuard('AUTO', { acceptNoStaticIpRisk: true });
   assert.equal(enableCalled, false);
   assert.equal(enabled.guardState, GuardState.ENABLED);
   assert.equal(store.getState().systemProxyApplied, false);
@@ -187,7 +188,7 @@ test('GuardService strict validate mode releases firewall when checks pass', asy
     return check;
   };
 
-  const enabled = await service.enableGuard(GuardMode.STRICT_VALIDATE);
+  const enabled = await service.enableGuard(GuardMode.STRICT_VALIDATE, { acceptNoStaticIpRisk: true });
   assert.equal(enabled.guardMode, GuardMode.STRICT_VALIDATE);
   assert.equal(enabled.firewall.mode, 'CLEARED');
   assert.equal(applyCount, 0);
@@ -249,7 +250,7 @@ test('GuardService saveTargetRules persists rules and reloads firewall hosts', a
   assert.deepEqual(service.firewallManager.hosts, ['api.anthropic.com']);
 });
 
-test('GuardService blocks enable when static residential IP is missing', async () => {
+test('GuardService requires risk acknowledgement when static residential IP is missing', async () => {
   process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY = '1';
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
   const store = new Store(path.join(tmp, 'state.json'));
@@ -259,7 +260,7 @@ test('GuardService blocks enable when static residential IP is missing', async (
   const status = await service.enableGuard();
 
   assert.equal(status.guardState, GuardState.DISABLED);
-  assert.equal(status.actionRequired.type, 'STATIC_RESIDENTIAL_IP_REQUIRED');
+  assert.equal(status.actionRequired.type, 'CLAUDE_ACCOUNT_RISK_ACK_REQUIRED');
   assert.equal(status.lastCheck.checkItems[0].verdict, 'FAIL');
 
   delete process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY;
@@ -271,22 +272,10 @@ test('GuardService skips static residential IP preflight when that check is disa
   const store = new Store(path.join(tmp, 'state.json'));
   const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
   service.firewallManager.clearBlock = async () => ({ mode: 'CLEARED', rules: [] });
-  service.checker.providers = async () => [
-    {
-      source: 'fixture',
-      ip: '203.0.113.10',
-      ipType: 'residential',
-      countryCode: 'US',
-      regionName: 'United States',
-      isProxy: false,
-      isVpn: false,
-      isTor: false,
-      riskScore: 0,
-      confidence: 90
-    }
-  ];
+  service.checker.providers = async () => [safePing0()];
   service.checker.externalAccessCheck = async () => ({ ok: true, claudeControlOk: true, results: [] });
   service.checker.claudeWebProbe = async () => ({ verdict: 'PASS', reasons: [], skipped: true });
+  service.checker.browserWebRtcCheck = async () => ({ supported: true, ok: true, requiredPolicy: 'disable_non_proxied_udp', browsers: [] });
   service.checker.environmentCheck = () => ({ verdict: 'PASS', reasons: [], timeZone: 'America/New_York', language: 'en-US' });
   await service.saveValidationConfig({
     services: { claude: true },
@@ -295,7 +284,7 @@ test('GuardService skips static residential IP preflight when that check is disa
     useCustomHosts: false
   });
 
-  const status = await service.enableGuard();
+  const status = await service.enableGuard('AUTO', { acceptNoStaticIpRisk: true });
 
   assert.equal(status.guardState, GuardState.ENABLED);
   assert.equal(status.actionRequired, null);
@@ -325,31 +314,96 @@ test('GuardService keeps guard disabled when every validation check is disabled'
   delete process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY;
 });
 
-test('GuardService blocks enable when configured static residential IP does not match current exit', async () => {
+test('GuardService blocks matching target request when configured static residential IP does not match current exit', async () => {
   process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY = '1';
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
   const store = new Store(path.join(tmp, 'state.json'));
   const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
   service.setStaticResidentialIp('203.0.113.9');
   service.firewallManager.clearBlock = async () => ({ mode: 'CLEARED', rules: [] });
+  service.checker.checkNow = async () => passCheck();
+  service.checker.providers = async () => [safePing0()];
+
+  const status = await service.enableGuard();
+  const decision = await service.evaluateGuardedTargetRequest('api.anthropic.com');
+
+  assert.equal(status.guardState, GuardState.ENABLED);
+  assert.equal(decision.block, true);
+  assert.equal(decision.reasons.includes('STATIC_RESIDENTIAL_IP_MISMATCH'), true);
+  assert.equal(store.getState().lastCheck.reasons.includes('STATIC_RESIDENTIAL_IP_MISMATCH'), true);
+
+  delete process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY;
+});
+
+test('GuardService allows matching target request from supported region without static IP after acknowledgement', async () => {
+  process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY = '1';
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
+  const store = new Store(path.join(tmp, 'state.json'));
+  const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
+  service.firewallManager.clearBlock = async () => ({ mode: 'CLEARED', rules: [] });
+  service.checker.checkNow = async () => passCheck();
+  service.checker.providers = async () => [safePing0()];
+
+  await service.enableGuard('AUTO', { acceptNoStaticIpRisk: true });
+  const decision = await service.evaluateGuardedTargetRequest('claude.ai');
+
+  assert.equal(decision.block, false);
+  assert.equal(store.getState().lastCheck.allowTargetTraffic, true);
+  assert.equal(store.getState().lastCheck.requestGate.mode, 'REGION_ONLY');
+
+  delete process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY;
+});
+
+test('GuardService blocks target request when Ping0 risk data is unavailable', async () => {
+  process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY = '1';
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
+  const store = new Store(path.join(tmp, 'state.json'));
+  const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
+  service.firewallManager.clearBlock = async () => ({ mode: 'CLEARED', rules: [] });
+  service.firewallManager.applyBlock = async () => ({ mode: 'BLOCK', rules: [] });
+  service.checker.checkNow = async () => passCheck();
   service.checker.providers = async () => [
     {
       source: 'fixture',
       ip: '203.0.113.10',
       ipType: 'residential',
+      countryCode: 'US',
+      regionName: 'United States',
       isProxy: false,
       isVpn: false,
       isTor: false,
       riskScore: 0,
       confidence: 90
-    }
+    },
+    { source: 'ping0.cc', error: 'CAPTCHA_REQUIRED' }
   ];
 
-  const status = await service.enableGuard();
+  await service.enableGuard('AUTO', { acceptNoStaticIpRisk: true });
+  const decision = await service.evaluateGuardedTargetRequest('claude.ai');
 
-  assert.equal(status.guardState, GuardState.DISABLED);
-  assert.equal(status.actionRequired.type, 'STATIC_RESIDENTIAL_IP_MISMATCH');
-  assert.equal(status.lastCheck.reasons.includes('STATIC_RESIDENTIAL_IP_MISMATCH'), true);
+  assert.equal(decision.block, true);
+  assert.equal(decision.reasons.includes(CheckReason.IP_RISK_DATA_UNAVAILABLE), true);
+  assert.equal(store.getState().lastCheck.allowTargetTraffic, false);
+
+  delete process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY;
+});
+
+test('GuardService blocks matching target request from unsupported Claude region without static IP', async () => {
+  process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY = '1';
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
+  const store = new Store(path.join(tmp, 'state.json'));
+  const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
+  service.firewallManager.clearBlock = async () => ({ mode: 'CLEARED', rules: [] });
+  service.firewallManager.applyBlock = async () => ({ mode: 'BLOCK', rules: [] });
+  service.checker.checkNow = async () => passCheck();
+  service.checker.providers = async () => [safePing0({ ip: '198.51.100.10', countryCode: 'CN', regionName: 'China' })];
+
+  await service.enableGuard('AUTO', { acceptNoStaticIpRisk: true });
+  const decision = await service.evaluateGuardedTargetRequest('claude.ai');
+
+  assert.equal(decision.block, true);
+  assert.deepEqual(decision.reasons, ['BLOCKED_REGION']);
+  assert.equal(store.getState().lastCheck.allowTargetTraffic, false);
 
   delete process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY;
 });
@@ -449,24 +503,35 @@ test('GuardService does not block target usage when usage-rate validation is dis
   assert.equal(store.getState().lastCheck.allowTargetTraffic, true);
 });
 
+test('GuardService status guidance separates checking from completed pass', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
+  const store = new Store(path.join(tmp, 'state.json'));
+  const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
+
+  store.update({
+    checkingNetwork: true,
+    lastCheck: {
+      checkedAt: new Date().toISOString(),
+      verdict: 'PASS',
+      reasons: [],
+      allowTargetTraffic: true
+    }
+  });
+  assert.equal(service.getStatus().guidance.title, '正在校验网络');
+  assert.equal(service.getStatus().checkingNetwork, true);
+
+  store.update({ checkingNetwork: false });
+  const status = service.getStatus();
+
+  assert.equal(status.guidance.title, '检测完成');
+  assert.equal(status.checkingNetwork, false);
+});
+
 test('GuardService rebindExitToCurrent binds the current provider IP without exposing it', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
   const store = new Store(path.join(tmp, 'state.json'));
   const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
-  service.checker.providers = async () => [
-    {
-      source: 'fixture',
-      ip: '203.0.113.10',
-      ipType: 'residential',
-      countryCode: 'US',
-      regionName: 'United States',
-      isProxy: false,
-      isVpn: false,
-      isTor: false,
-      riskScore: 0,
-      confidence: 90
-    }
-  ];
+  service.checker.providers = async () => [safePing0()];
 
   const status = await service.rebindExitToCurrent();
 
@@ -573,18 +638,19 @@ test('GuardService applyEnvironmentConsistency sets pendingPostApplyCheck', asyn
   assert.equal(result.status.environmentConsistency.lastTargetProfile.timeZone, 'America/Chicago');
 });
 
-test('GuardService setMonitoringConfig persists enabled interval', () => {
+test('GuardService setMonitoringConfig keeps background monitoring disabled', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
   const store = new Store(path.join(tmp, 'state.json'));
   const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
 
   const status = service.setMonitoringConfig({ enabled: true, intervalMinutes: 5 });
 
-  assert.equal(status.monitoring.enabled, true);
+  assert.equal(status.monitoring.enabled, false);
   assert.equal(status.monitoring.intervalMinutes, 5);
+  assert.equal(service.monitoringTimer, null);
 });
 
-test('GuardService runMonitoringTick records compact result and skips overlap', async () => {
+test('GuardService runMonitoringTick is disabled and does not run checks', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
   const store = new Store(path.join(tmp, 'state.json'));
   const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
@@ -594,12 +660,11 @@ test('GuardService runMonitoringTick records compact result and skips overlap', 
     return { verdict: 'PASS', reasons: [], checkedAt: '2026-06-05T00:00:00.000Z' };
   };
 
-  await service.runMonitoringTick();
-  service.monitoringRunning = true;
-  await service.runMonitoringTick();
+  const result = await service.runMonitoringTick();
 
   const monitoring = store.getState().monitoring;
-  assert.equal(calls, 1);
-  assert.equal(monitoring.lastResult.verdict, 'PASS');
-  assert.equal(monitoring.lastError, 'MONITORING_ALREADY_RUNNING');
+  assert.equal(result, null);
+  assert.equal(calls, 0);
+  assert.equal(monitoring.enabled, false);
+  assert.equal(monitoring.lastError, null);
 });

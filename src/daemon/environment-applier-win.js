@@ -173,16 +173,14 @@ class EnvironmentApplierWin {
       return { ok: false, steps: { platform: stepResult(false, 'UNSUPPORTED_PLATFORM') } };
     }
 
-    if (!keepChineseInput) {
-      const running = await this.isBrowserRunning();
-      if (running.length) {
-        return {
-          ok: false,
-          steps: {
-            preflight: stepResult(false, 'BROWSER_RUNNING', { running })
-          }
-        };
-      }
+    const running = await this.isBrowserRunning();
+    if (running.length) {
+      return {
+        ok: false,
+        steps: {
+          preflight: stepResult(false, 'BROWSER_RUNNING', { running })
+        }
+      };
     }
 
     const steps = {};
@@ -369,8 +367,23 @@ class EnvironmentApplierWin {
       return stepResult(true, null, { skipped: true, reason: 'NOT_INSTALLED' });
     }
     try {
-      if (backupSection.webrtcPolicyApplied) {
-        await this.runCmd('reg', ['delete', `HKCU\\${browser.policyKey}`, '/v', 'WebRtcIPHandlingPolicy', '/f']);
+      if (backupSection.webrtcPolicy === null || backupSection.webrtcPolicy === undefined) {
+        await this.runCmd('reg', ['delete', `HKCU\\${browser.policyKey}`, '/v', 'WebRtcIPHandlingPolicy', '/f']).catch((error) => {
+          const message = String(error && error.message ? error.message : error);
+          if (!/unable|not found|cannot find|找不到|系统找不到/i.test(message)) throw error;
+        });
+      } else {
+        await this.runCmd('reg', [
+          'add',
+          `HKCU\\${browser.policyKey}`,
+          '/v',
+          'WebRtcIPHandlingPolicy',
+          '/t',
+          'REG_SZ',
+          '/d',
+          backupSection.webrtcPolicy,
+          '/f'
+        ]);
       }
       return stepResult(true);
     } catch (error) {

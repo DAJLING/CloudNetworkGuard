@@ -4,7 +4,7 @@ const net = require('net');
 const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
-const { MacCommandRunner } = require('./macos-command-runner');
+const { MacCommandRunner, quoteShellArg } = require('./macos-command-runner');
 
 const FIREWALL_RULE_PREFIX = 'ClaudeNetworkGuard';
 const FIREWALL_TARGET_HOSTS = [
@@ -74,6 +74,31 @@ function ensurePfAnchorBlock(
     PF_CONF_BLOCK_END
   ].join('\n');
   return `${cleaned.replace(/\s+$/g, '')}${cleaned.trim() ? '\n' : ''}${block}\n`;
+}
+
+function base64DecodeToFileCommand(filePath, content, tmpVar) {
+  const encoded = Buffer.from(String(content), 'utf8').toString('base64');
+  return [
+    `${tmpVar}=$(/usr/bin/mktemp -t network-guard.XXXXXX)`,
+    `printf %s ${quoteShellArg(encoded)} | base64 --decode > "$${tmpVar}"`,
+    `mv "$${tmpVar}" ${quoteShellArg(filePath)}`,
+    `chmod 0644 ${quoteShellArg(filePath)}`
+  ];
+}
+
+function enablePfShellCommand() {
+  return [
+    'set +e',
+    'pf_enable_output=$(pfctl -e 2>&1)',
+    'pf_enable_status=$?',
+    'set -e',
+    'if [ "$pf_enable_status" -ne 0 ]; then',
+    'case "$pf_enable_output" in',
+    '*"pf already enabled"*) true ;;',
+    '*) printf "%s\\n" "$pf_enable_output" >&2; exit "$pf_enable_status" ;;',
+    'esac',
+    'fi'
+  ].join('; ');
 }
 
 async function isWindowsElevated(execFileImpl = execFilePromise) {
@@ -266,6 +291,35 @@ class FirewallManager {
     return this.fs.readFileSync(this.pfConfPath, 'utf8');
   }
 
+  pfAnchorExists() {
+    try {
+      return this.fs.existsSync(this.pfAnchorPath);
+    } catch {
+      return false;
+    }
+  }
+
+  hasManagedPfBlock() {
+    return this.readPfConf().includes(PF_CONF_BLOCK_START) || this.pfAnchorExists();
+  }
+
+  async runPrivilegedScriptOrFallback(script, fallback) {
+    if (this.macRunner && typeof this.macRunner.runPrivilegedScript === 'function') {
+      return this.macRunner.runPrivilegedScript(script);
+    }
+    return fallback();
+  }
+
+  async enablePfFallback() {
+    try {
+      await this.macRunner.runPrivilegedCommands([['pfctl', '-e']]);
+    } catch (error) {
+      if (!/pf already enabled/i.test(String(error && error.message ? error.message : error))) {
+        throw error;
+      }
+    }
+  }
+
   async applyMacBlock() {
     let resolved = { ips: [], results: [] };
     try {
@@ -287,13 +341,31 @@ class FirewallManager {
         anchorPath: this.pfAnchorPath
       });
 
-      await this.macRunner.writeFilePrivileged(this.pfAnchorPath, ruleText);
-      await this.macRunner.writeFilePrivileged(this.pfConfPath, patchedPfConf);
-      await this.macRunner.runPrivilegedCommands([
-        ['pfctl', '-nf', this.pfConfPath],
-        ['pfctl', '-f', this.pfConfPath],
-        ['pfctl', '-e']
-      ]);
+      const commands = [
+        ...base64DecodeToFileCommand(this.pfAnchorPath, ruleText, 'anchor_tmp'),
+        ...base64DecodeToFileCommand(this.pfConfPath, patchedPfConf, 'conf_tmp'),
+        `pfctl -nf ${quoteShellArg(this.pfConfPath)}`,
+        `pfctl -f ${quoteShellArg(this.pfConfPath)}`,
+        enablePfShellCommand()
+      ];
+      const script = [
+        'set -e',
+        'anchor_tmp=',
+        'conf_tmp=',
+        'trap \'[ -n "$anchor_tmp" ] && rm -f "$anchor_tmp"; [ -n "$conf_tmp" ] && rm -f "$conf_tmp"\' EXIT',
+        ...commands,
+        'trap - EXIT'
+      ].join(' && ');
+
+      await this.runPrivilegedScriptOrFallback(script, async () => {
+        await this.macRunner.writeFilePrivileged(this.pfAnchorPath, ruleText);
+        await this.macRunner.writeFilePrivileged(this.pfConfPath, patchedPfConf);
+        await this.macRunner.runPrivilegedCommands([
+          ['pfctl', '-nf', this.pfConfPath],
+          ['pfctl', '-f', this.pfConfPath]
+        ]);
+        await this.enablePfFallback();
+      });
 
       return {
         applied: true,
@@ -315,13 +387,35 @@ class FirewallManager {
 
   async clearMacBlock() {
     try {
+      if (!this.hasManagedPfBlock()) {
+        return {
+          applied: false,
+          mode: 'PF_NOOP',
+          rules: [],
+          lastError: null
+        };
+      }
+
       const patchedPfConf = removePfAnchorBlock(this.readPfConf());
-      await this.macRunner.writeFilePrivileged(this.pfConfPath, patchedPfConf);
-      await this.macRunner.removeFilePrivileged(this.pfAnchorPath);
-      await this.macRunner.runPrivilegedCommands([
-        ['pfctl', '-nf', this.pfConfPath],
-        ['pfctl', '-f', this.pfConfPath]
-      ]);
+      const script = [
+        'set -e',
+        'conf_tmp=',
+        'trap \'[ -n "$conf_tmp" ] && rm -f "$conf_tmp"\' EXIT',
+        ...base64DecodeToFileCommand(this.pfConfPath, patchedPfConf, 'conf_tmp'),
+        `rm -f ${quoteShellArg(this.pfAnchorPath)}`,
+        `pfctl -nf ${quoteShellArg(this.pfConfPath)}`,
+        `pfctl -f ${quoteShellArg(this.pfConfPath)}`,
+        'trap - EXIT'
+      ].join(' && ');
+
+      await this.runPrivilegedScriptOrFallback(script, async () => {
+        await this.macRunner.writeFilePrivileged(this.pfConfPath, patchedPfConf);
+        await this.macRunner.removeFilePrivileged(this.pfAnchorPath);
+        await this.macRunner.runPrivilegedCommands([
+          ['pfctl', '-nf', this.pfConfPath],
+          ['pfctl', '-f', this.pfConfPath]
+        ]);
+      });
       return {
         applied: true,
         mode: 'PF_CLEARED',

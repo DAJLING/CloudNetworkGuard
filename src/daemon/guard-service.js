@@ -1,18 +1,18 @@
 const http = require('http');
 const path = require('path');
 const { Store } = require('./store');
-const { NetworkChecker, enabledChecksFromConfig } = require('./network-checker');
+const { NetworkChecker, enabledChecksFromConfig, evaluateStaticResidentialIp } = require('./network-checker');
 const { ProxyManager } = require('./proxy-manager');
 const { GuardProxy } = require('./guard-proxy');
 const { recordTargetUsage } = require('./usage-monitor');
 const { FirewallManager } = require('./firewall-manager');
-const { TARGET_CONFIG_FILE, TargetConfigManager, hasEnabledValidationChecks } = require('./target-config');
-const { scoreProviderResults } = require('./scoring');
+const { TARGET_CONFIG_FILE, TargetConfigManager, hasEnabledValidationChecks, STATIC_IP_SKIP_VALUE } = require('./target-config');
+const { providerReasonsForEnabledChecks, scoreProviderResults } = require('./scoring');
 const { hashIp, maskIp } = require('./static-ip-observer');
 const { buildDiagnosticReport } = require('./diagnostic-report');
 const { EnvironmentConsistencyService } = require('./environment-consistency-service');
-const { GuardMode, GuardState, NetworkVerdict } = require('../shared/constants');
-const { getTopReasonGuidance } = require('../shared/reason-catalog');
+const { CheckReason, GuardMode, GuardState, NetworkVerdict } = require('../shared/constants');
+const { getReasonGuidance, getTopReasonGuidance } = require('../shared/reason-catalog');
 
 function defaultEnvironmentConsistencyState() {
   return {
@@ -36,6 +36,44 @@ function defaultMonitoringState() {
     lastResult: null,
     lastError: null
   };
+}
+
+function hasBoundStaticResidentialIp(targetConfig = {}) {
+  const value = String(targetConfig.staticResidentialIp || '').trim();
+  return Boolean(value && value !== STATIC_IP_SKIP_VALUE);
+}
+
+function buildStatusGuidance(state = {}) {
+  if (state.checkingNetwork) return getReasonGuidance(CheckReason.CHECK_PENDING);
+
+  const check = state.lastCheck || null;
+  const reasons = check && Array.isArray(check.reasons) ? check.reasons : [];
+  if (!check) {
+    return {
+      reason: null,
+      priority: 0,
+      severity: 'info',
+      title: '等待检测结果',
+      explanation: '点击“立即检测”后会显示最重要的阻断原因和下一步建议。',
+      actions: []
+    };
+  }
+
+  if (!reasons.length) {
+    return {
+      reason: null,
+      priority: 0,
+      severity: 'info',
+      title: check.verdict === NetworkVerdict.PASS ? '检测完成' : '没有需要修复的阻断项',
+      explanation:
+        check.verdict === NetworkVerdict.PASS
+          ? '当前网络校验已完成，没有发现需要修复的阻断项。'
+          : '检测已完成，但没有返回明确的阻断原因。可查看检测报告确认细节。',
+      actions: [{ id: 'retry-check', label: '重新检测', tone: 'secondary' }]
+    };
+  }
+
+  return getTopReasonGuidance(reasons);
 }
 
 function shouldUseSystemProxy() {
@@ -64,7 +102,7 @@ class GuardService {
       port: proxyPort,
       getStatus: () => this.getStatus(),
       getTargetRules: () => this.targetConfig.rules,
-      onTargetRequest: (host) => this.recordTargetRequest(host),
+      onTargetRequest: (host) => this.evaluateGuardedTargetRequest(host),
       emitEvent: (event) => this.emit(event)
     });
     this.apiServer = http.createServer(this.handleApi.bind(this));
@@ -73,6 +111,9 @@ class GuardService {
     });
     this.monitoringTimer = null;
     this.monitoringRunning = false;
+    this.requestExitCheckCache = null;
+    this.requestExitCheckPromise = null;
+    this.requestExitCheckTtlMs = 30 * 1000;
   }
 
   getEnvironmentConsistencyStatus() {
@@ -95,6 +136,7 @@ class GuardService {
     return {
       ...defaultMonitoringState(),
       ...(this.store.getState().monitoring || {}),
+      enabled: false,
       running: this.monitoringRunning === true
     };
   }
@@ -112,16 +154,15 @@ class GuardService {
 
   setMonitoringConfig(config = {}) {
     const current = this.getMonitoringStatus();
-    const normalized = this.normalizeMonitoringConfig(config);
     this.store.update({
       monitoring: {
         ...current,
-        ...normalized,
+        enabled: false,
+        intervalMinutes: Number(config.intervalMinutes) || current.intervalMinutes || 15,
         running: undefined,
         lastError: null
       }
     });
-    this.rescheduleMonitoring();
     const status = this.getStatus();
     this.emit({ type: 'monitoring-config', status });
     return status;
@@ -135,62 +176,19 @@ class GuardService {
 
   rescheduleMonitoring() {
     this.clearMonitoringTimer();
-    const monitoring = this.getMonitoringStatus();
-    if (!monitoring.enabled) return;
-    this.monitoringTimer = setInterval(
-      () => {
-        this.runMonitoringTick().catch(() => {});
-      },
-      monitoring.intervalMinutes * 60 * 1000
-    );
-    if (typeof this.monitoringTimer.unref === 'function') this.monitoringTimer.unref();
   }
 
   async runMonitoringTick() {
-    if (this.monitoringRunning) {
-      this.store.update({
-        monitoring: {
-          ...this.getMonitoringStatus(),
-          running: undefined,
-          lastError: 'MONITORING_ALREADY_RUNNING'
-        }
-      });
-      this.emit({ type: 'monitoring-skipped', status: this.getStatus() });
-      return null;
-    }
-
-    this.monitoringRunning = true;
-    const ranAt = new Date().toISOString();
-    try {
-      const check = await this.checkNow();
-      this.store.update({
-        monitoring: {
-          ...this.getMonitoringStatus(),
-          running: undefined,
-          lastRunAt: ranAt,
-          lastResult: {
-            verdict: check.verdict || 'UNKNOWN',
-            reasons: Array.isArray(check.reasons) ? check.reasons : [],
-            checkedAt: check.checkedAt || ranAt
-          },
-          lastError: null
-        }
-      });
-      return check;
-    } catch (error) {
-      this.store.update({
-        monitoring: {
-          ...this.getMonitoringStatus(),
-          running: undefined,
-          lastRunAt: ranAt,
-          lastError: error.message || 'MONITORING_FAILED'
-        }
-      });
-      return null;
-    } finally {
-      this.monitoringRunning = false;
-      this.emit({ type: 'monitoring-tick', status: this.getStatus() });
-    }
+    this.store.update({
+      monitoring: {
+        ...this.getMonitoringStatus(),
+        enabled: false,
+        running: undefined,
+        lastError: null
+      }
+    });
+    this.emit({ type: 'monitoring-disabled', status: this.getStatus() });
+    return null;
   }
 
   async start() {
@@ -207,7 +205,6 @@ class GuardService {
         resolve();
       });
     });
-    this.rescheduleMonitoring();
     return this.getStatus();
   }
 
@@ -234,6 +231,7 @@ class GuardService {
       },
       lastCheck: state.lastCheck,
       firewall: state.firewall,
+      checkingNetwork: state.checkingNetwork === true,
       recovery: state.recovery || { lastResult: null },
       binding: {
         bound: Boolean(state.boundExitIpHash),
@@ -241,11 +239,12 @@ class GuardService {
         lastCheckedAt: state.lastCheck ? state.lastCheck.checkedAt : null,
         mismatch: reasons.includes('IP_BINDING_MISMATCH')
       },
+      claudeRiskAcceptedAt: state.claudeRiskAcceptedAt || null,
       clientEnvironment: state.clientEnvironment,
       environmentConsistency: this.getEnvironmentConsistencyStatus(),
       monitoring: this.getMonitoringStatus(),
       actionRequired: state.actionRequired || null,
-      guidance: getTopReasonGuidance(reasons),
+      guidance: buildStatusGuidance(state),
       targetConfig: this.targetConfig,
       logs: state.logs || []
     };
@@ -360,6 +359,150 @@ class GuardService {
     return { block: false, reasons: [] };
   }
 
+  clearRequestExitCheckCache() {
+    this.requestExitCheckCache = null;
+    this.requestExitCheckPromise = null;
+  }
+
+  async evaluateGuardedTargetRequest(host) {
+    const state = this.store.getState();
+    if (state.guardState !== GuardState.ENABLED) return { block: false, reasons: [] };
+
+    const exitDecision = await this.evaluateRequestExit(host);
+    if (exitDecision.block) return exitDecision;
+
+    return this.recordTargetRequest(host);
+  }
+
+  async evaluateRequestExit(host) {
+    const now = Date.now();
+    if (
+      this.requestExitCheckCache &&
+      now - this.requestExitCheckCache.checkedAtMs < this.requestExitCheckTtlMs
+    ) {
+      return this.requestExitCheckCache.decision;
+    }
+
+    if (!this.requestExitCheckPromise) {
+      this.requestExitCheckPromise = this.runRequestExitCheck(host)
+        .then((decision) => {
+          this.requestExitCheckCache = { checkedAtMs: Date.now(), decision };
+          return decision;
+        })
+        .finally(() => {
+          this.requestExitCheckPromise = null;
+        });
+    }
+
+    return this.requestExitCheckPromise;
+  }
+
+  async runRequestExitCheck(host) {
+    const checkedAt = new Date().toISOString();
+    const targetConfig = this.targetConfig || {};
+    const staticResidentialIp = String(targetConfig.staticResidentialIp || '').trim();
+    const providerResults = await this.checker.collectProviderResults();
+    const providerScore = scoreProviderResults(providerResults);
+    const enabledChecks = enabledChecksFromConfig(targetConfig);
+    const providerReasons = providerReasonsForEnabledChecks(providerScore, enabledChecks);
+    const state = this.store.getState();
+    const reasons = [];
+    let staticObservation = { verdict: NetworkVerdict.PASS, reason: null, nextState: null };
+
+    if (hasBoundStaticResidentialIp(targetConfig)) {
+      staticObservation = evaluateStaticResidentialIp({
+        currentIp: providerScore.ip,
+        configuredIp: staticResidentialIp,
+        now: Date.now(),
+        salt: state.salt
+      });
+      if (staticObservation.reason) reasons.push(staticObservation.reason);
+    }
+    reasons.push(...providerReasons);
+
+    const allowTargetTraffic = reasons.length === 0;
+    const check = {
+      checkedAt,
+      verdict: allowTargetTraffic ? NetworkVerdict.PASS : NetworkVerdict.BLOCK,
+      reasons: Array.from(new Set(reasons)),
+      allowTargetTraffic,
+      requestGate: {
+        host,
+        mode: hasBoundStaticResidentialIp(targetConfig) ? 'STATIC_IP_EXACT_MATCH' : 'REGION_ONLY'
+      },
+      ip: {
+        maskedIp: staticObservation.nextState ? staticObservation.nextState.maskedIp : maskIp(providerScore.ip),
+        ipType: providerScore.ipType,
+        countryCode: providerScore.countryCode,
+        regionName: providerScore.regionName,
+        asn: providerScore.asn,
+        riskScore: providerScore.riskScore,
+        ping0Purity: providerScore.ping0Purity || null,
+        sharedUsers: providerScore.sharedUsers || null,
+        sharedUsersMax: typeof providerScore.sharedUsersMax === 'number' ? providerScore.sharedUsersMax : null,
+        confidence: providerScore.confidence
+      },
+      providers: providerResults.map((result) => ({
+        source: result.source,
+        error: result.error || null,
+        ipType: result.ipType || null,
+        countryCode: result.countryCode || null,
+        regionName: result.regionName || null,
+        asn: result.asn || null,
+        riskScore: result.riskScore || null,
+        ping0Purity: result.ping0Purity || null,
+        sharedUsers: result.sharedUsers || null,
+        sharedUsersMax: typeof result.sharedUsersMax === 'number' ? result.sharedUsersMax : null,
+        cached: result.cached === true,
+        cacheReason: result.cacheReason || null,
+        confidence: result.confidence || null
+      })),
+      checkItems: [
+        {
+          id: 'request-exit',
+          label: hasBoundStaticResidentialIp(targetConfig) ? '请求出口 IP' : '请求出口地区',
+          verdict: allowTargetTraffic ? 'PASS' : 'FAIL',
+          detail: hasBoundStaticResidentialIp(targetConfig)
+            ? allowTargetTraffic
+              ? `出口 IP 与静态住宅 IP 完全一致`
+              : staticObservation.reason
+                ? `当前出口 ${staticObservation.nextState ? staticObservation.nextState.maskedIp : '未知'} 与静态住宅 IP 不一致`
+                : `出口 IP 已匹配，但风险校验未通过`
+            : allowTargetTraffic
+              ? `出口地区 ${providerScore.countryCode || 'unknown'} 与风险校验可用于 Claude`
+              : `出口地区或 Ping0 风控校验未通过`,
+          reason: reasons[0] || null
+        }
+      ],
+      targets: {
+        staticResidentialIp,
+        rules: targetConfig.rules || []
+      }
+    };
+
+    this.store.update({
+      staticIp: hasBoundStaticResidentialIp(targetConfig) ? staticObservation.nextState : state.staticIp,
+      lastCheck: check
+    });
+    this.store.appendLog({
+      at: check.checkedAt,
+      verdict: check.verdict,
+      reasons: check.reasons,
+      maskedIp: check.ip.maskedIp,
+      asn: check.ip.asn,
+      host
+    });
+
+    const decision = {
+      block: !allowTargetTraffic,
+      reasons: check.reasons,
+      check
+    };
+    this.emit({ type: 'request-exit-check', host, decision, status: this.getStatus() });
+    this.syncFirewallForStatus().catch(() => {});
+    return decision;
+  }
+
   updateClientEnvironment(environment) {
     this.store.update({ clientEnvironment: environment });
     this.emit({ type: 'environment-updated', status: this.getStatus() });
@@ -403,6 +546,7 @@ class GuardService {
     const currentState = this.store.getState();
     const previousFirewallRules = currentState.firewall && currentState.firewall.rules ? currentState.firewall.rules : [];
     this.targetConfig = this.targetConfigManager.load();
+    this.clearRequestExitCheckCache();
     this.firewallManager.setHosts(this.targetConfig.firewallHosts || []);
     if (previousFirewallRules.length) {
       const clearResult = await this.firewallManager.clearBlock(previousFirewallRules).catch((error) => ({
@@ -433,6 +577,7 @@ class GuardService {
 
   setStaticResidentialIp(value) {
     this.targetConfig = this.targetConfigManager.setStaticResidentialIp(value);
+    this.clearRequestExitCheckCache();
     this.store.update({ actionRequired: null });
     const status = this.getStatus();
     this.emit({ type: 'static-ip-updated', status });
@@ -498,7 +643,7 @@ class GuardService {
     return result;
   }
 
-  async enableGuard(mode = GuardMode.AUTO) {
+  async enableGuard(mode = GuardMode.AUTO, options = {}) {
     if (!hasEnabledValidationChecks(this.targetConfig.validation)) {
       const check = {
         checkedAt: new Date().toISOString(),
@@ -517,57 +662,66 @@ class GuardService {
       return status;
     }
 
-    const staticPreflight = await this.checker.checkStaticResidentialIpPreflight();
-    if (!staticPreflight.ok) {
-      const preflightCheck = {
+    const hasStaticIp = hasBoundStaticResidentialIp(this.targetConfig);
+    const acceptedRisk = options.acceptNoStaticIpRisk === true;
+    if (!hasStaticIp && !acceptedRisk) {
+      const riskCheck = {
         checkedAt: new Date().toISOString(),
         verdict: NetworkVerdict.BLOCK,
-        reasons: [staticPreflight.reason],
+        reasons: [CheckReason.CLAUDE_ACCOUNT_RISK_ACK_REQUIRED],
         allowTargetTraffic: false,
-        checkItems: [staticPreflight.checkItem]
+        checkItems: [
+          {
+            id: 'claude-account-risk',
+            label: '账号风险确认',
+            verdict: 'FAIL',
+            detail: '未绑定静态住宅 IP，开启前需要确认 Claude 使用风险。',
+            reason: CheckReason.CLAUDE_ACCOUNT_RISK_ACK_REQUIRED
+          }
+        ]
       };
       this.store.update({
         guardState: GuardState.DISABLED,
         actionRequired: {
-          type: staticPreflight.reason,
-          currentMaskedIp: staticPreflight.currentMaskedIp || null
+          type: CheckReason.CLAUDE_ACCOUNT_RISK_ACK_REQUIRED
+        },
+        lastCheck: riskCheck
+      });
+      const firewallResult = await this.syncFirewallForStatus();
+      const status = this.getStatus();
+      this.emit({ type: 'claude-risk-ack-required', firewallResult, status });
+      return status;
+    }
+
+    if (!hasStaticIp && options.acceptNoStaticIpRisk === true) {
+      this.store.update({ claudeRiskAcceptedAt: new Date().toISOString() });
+    }
+
+    const preflightCheck = await this.checkNow();
+    if (preflightCheck.verdict !== NetworkVerdict.PASS || preflightCheck.allowTargetTraffic !== true) {
+      this.store.update({
+        guardState: GuardState.DISABLED,
+        actionRequired: {
+          type: preflightCheck.reasons && preflightCheck.reasons[0] ? preflightCheck.reasons[0] : 'NETWORK_CHECK_FAILED'
         },
         lastCheck: preflightCheck
       });
-      const firewallResult = await this.syncFirewallForStatus();
       const status = this.getStatus();
-      this.emit({ type: 'static-ip-preflight-blocked', firewallResult, status });
+      this.emit({ type: 'guard-enable-failed', status, check: preflightCheck });
       return status;
     }
 
-    await this.clearManagedNetworkBlocks().catch(() => {});
-    const check = await this.runNetworkCheck();
     const proxyResult = await this.setSystemProxyEnabled(true);
-
-    if (check.allowTargetTraffic !== true) {
-      this.store.update({
-        guardState: GuardState.DISABLED,
-        guardMode: this.normalizeGuardMode(mode),
-        actionRequired: null,
-        lastCheck: check
-      });
-      const firewallResult = await this.syncFirewallForStatus();
-      const decoratedCheck = this.decorateCheckWithFirewall(check, firewallResult);
-      this.store.update({ lastCheck: decoratedCheck });
-      const status = this.getStatus();
-      this.emit({ type: 'guard-enable-failed', proxyResult, firewallResult, status, check: decoratedCheck });
-      return status;
-    }
-
     this.store.update({
       guardState: GuardState.ENABLED,
       guardMode: this.normalizeGuardMode(mode),
       actionRequired: null,
-      lastCheck: check
+      lastCheck: preflightCheck
     });
     const firewallResult = await this.syncFirewallForStatus();
-    const decoratedCheck = this.decorateCheckWithFirewall(check, firewallResult);
+    const decoratedCheck = this.decorateCheckWithFirewall(this.store.getState().lastCheck || preflightCheck, firewallResult);
     this.store.update({ lastCheck: decoratedCheck });
+    this.clearRequestExitCheckCache();
     const status = this.getStatus();
     this.emit({ type: 'guard-enabled', proxyResult, firewallResult, status, check: decoratedCheck });
     return status;
@@ -775,7 +929,7 @@ class GuardService {
   }
 
   async rebindExitToCurrent() {
-    const providerResults = await this.checker.providers();
+    const providerResults = await this.checker.collectProviderResults();
     const providerScore = scoreProviderResults(providerResults);
     if (!providerScore.ip) {
       throw new Error('PROVIDER_UNAVAILABLE');

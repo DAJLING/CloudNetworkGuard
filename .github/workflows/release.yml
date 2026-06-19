@@ -1,6 +1,7 @@
 name: Release Installers
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - "v*"
@@ -37,7 +38,7 @@ jobs:
           corepack prepare pnpm@11.8.0 --activate
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
 
       - name: Generate icons
         run: pnpm run make-icon

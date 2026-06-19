@@ -44,9 +44,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      - name: Generate icons
-        run: pnpm run make-icon
-
       - name: Test
         run: pnpm test
 

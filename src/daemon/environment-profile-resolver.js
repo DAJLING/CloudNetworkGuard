@@ -173,9 +173,5 @@ function mapIanaToWindows(ianaTimeZone) {
 }
 
 module.exports = {
-  COUNTRY_PROFILES,
-  US_REGION_RULES,
-  resolveEnvironmentProfile,
-  resolveUsRegion,
-  mapIanaToWindows
+  resolveEnvironmentProfile
 };

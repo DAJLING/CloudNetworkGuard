@@ -7,7 +7,11 @@ const { GuardProxy } = require('./guard-proxy');
 const { recordTargetUsage } = require('./usage-monitor');
 const { FirewallManager } = require('./firewall-manager');
 const { TARGET_CONFIG_FILE, TargetConfigManager, hasEnabledValidationChecks, STATIC_IP_SKIP_VALUE } = require('./target-config');
-const { providerReasonsForEnabledChecks, scoreProviderResults } = require('./scoring');
+const {
+  blockingProviderReasonsForEnabledChecks,
+  providerReasonsForEnabledChecks,
+  scoreProviderResults
+} = require('./scoring');
 const { hashIp, maskIp } = require('./static-ip-observer');
 const { buildDiagnosticReport } = require('./diagnostic-report');
 const { EnvironmentConsistencyService } = require('./environment-consistency-service');
@@ -111,6 +115,8 @@ class GuardService {
     });
     this.monitoringTimer = null;
     this.monitoringRunning = false;
+    this.proxyWatchTimer = null;
+    this.proxyWatchRunning = false;
     this.requestExitCheckCache = null;
     this.requestExitCheckPromise = null;
     this.requestExitCheckTtlMs = 30 * 1000;
@@ -198,6 +204,9 @@ class GuardService {
     }
     await this.clearManagedNetworkBlocks().catch(() => {});
     await this.proxy.start();
+    if (this.store.getState().guardState === GuardState.ENABLED) {
+      this.startProxyWatch();
+    }
     await new Promise((resolve, reject) => {
       this.apiServer.once('error', reject);
       this.apiServer.listen(this.apiPort, '127.0.0.1', () => {
@@ -210,6 +219,7 @@ class GuardService {
 
   async stop() {
     this.clearMonitoringTimer();
+    if (proxyError) this.stopProxyWatch();
     await this.proxy.stop();
     await new Promise((resolve) => this.apiServer.close(() => resolve()));
   }
@@ -226,6 +236,7 @@ class GuardService {
       proxy: {
         host: this.proxyManager.host,
         port: this.proxyManager.port,
+        upstream: this.proxy.upstreamProxy,
         systemApplied: state.systemProxyApplied === true,
         mode: state.systemProxyApplied ? 'SYSTEM' : process.platform === 'win32' ? 'FIREWALL_ONLY' : 'LOCAL_ONLY'
       },
@@ -364,9 +375,76 @@ class GuardService {
     this.requestExitCheckPromise = null;
   }
 
+  startProxyWatch() {
+    if (this.proxyWatchTimer || !shouldUseSystemProxy() || process.platform !== 'darwin') return;
+    this.proxyWatchTimer = setInterval(() => {
+      this.ensureSystemProxyStillApplied().catch(() => {});
+    }, 3000);
+    if (typeof this.proxyWatchTimer.unref === 'function') this.proxyWatchTimer.unref();
+  }
+
+  stopProxyWatch() {
+    if (!this.proxyWatchTimer) return;
+    clearInterval(this.proxyWatchTimer);
+    this.proxyWatchTimer = null;
+  }
+
+  async ensureSystemProxyStillApplied() {
+    if (this.proxyWatchRunning) return null;
+    const state = this.store.getState();
+    if (state.guardState !== GuardState.ENABLED || state.systemProxyApplied !== true) return null;
+    if (!shouldUseSystemProxy() || process.platform !== 'darwin') return null;
+
+    this.proxyWatchRunning = true;
+    try {
+      const verification = await this.proxyManager.verifyMacProxyApplied();
+      if (verification.ok) return { ok: true, verification };
+
+      const proxyResult = await this.setSystemProxyEnabled(true);
+      this.store.appendLog({
+        type: 'system-proxy-reapplied',
+        at: new Date().toISOString(),
+        verdict: 'WARN',
+        reasons: ['SYSTEM_PROXY_REAPPLIED'],
+        maskedIp: state.lastCheck && state.lastCheck.ip ? state.lastCheck.ip.maskedIp : null,
+        asn: state.lastCheck && state.lastCheck.ip ? state.lastCheck.ip.asn : null
+      });
+      const status = this.getStatus();
+      this.emit({ type: 'system-proxy-reapplied', proxyResult, verification, status });
+      return { ok: true, verification, proxyResult };
+    } catch (error) {
+      const currentCheck = this.store.getState().lastCheck || {};
+      const failedCheck = {
+        ...currentCheck,
+        checkedAt: new Date().toISOString(),
+        verdict: NetworkVerdict.BLOCK,
+        reasons: Array.from(new Set([...(currentCheck.reasons || []), 'SYSTEM_PROXY_NOT_APPLIED'])),
+        allowTargetTraffic: false
+      };
+      this.store.update({
+        systemProxyApplied: false,
+        actionRequired: { type: 'SYSTEM_PROXY_NOT_APPLIED', detail: error.message || 'PROXY_WATCH_FAILED' },
+        lastCheck: failedCheck
+      });
+      const firewallResult = await this.syncFirewallForStatus();
+      const status = this.getStatus();
+      this.emit({ type: 'system-proxy-lost', error: error.message || 'PROXY_WATCH_FAILED', firewallResult, status });
+      return { ok: false, error: error.message || 'PROXY_WATCH_FAILED' };
+    } finally {
+      this.proxyWatchRunning = false;
+    }
+  }
+
   async evaluateGuardedTargetRequest(host) {
     const state = this.store.getState();
     if (state.guardState !== GuardState.ENABLED) return { block: false, reasons: [] };
+    if (state.lastCheck && state.lastCheck.allowTargetTraffic === false) {
+      return {
+        block: true,
+        reasons: state.lastCheck.reasons || ['NETWORK_CHECK_FAILED'],
+        check: state.lastCheck
+      };
+    }
 
     const exitDecision = await this.evaluateRequestExit(host);
     if (exitDecision.block) return exitDecision;
@@ -378,6 +456,8 @@ class GuardService {
     const now = Date.now();
     if (
       this.requestExitCheckCache &&
+      this.requestExitCheckCache.decision &&
+      this.requestExitCheckCache.decision.block === true &&
       now - this.requestExitCheckCache.checkedAtMs < this.requestExitCheckTtlMs
     ) {
       return this.requestExitCheckCache.decision;
@@ -386,7 +466,7 @@ class GuardService {
     if (!this.requestExitCheckPromise) {
       this.requestExitCheckPromise = this.runRequestExitCheck(host)
         .then((decision) => {
-          this.requestExitCheckCache = { checkedAtMs: Date.now(), decision };
+          this.requestExitCheckCache = decision.block ? { checkedAtMs: Date.now(), decision } : null;
           return decision;
         })
         .finally(() => {
@@ -405,6 +485,7 @@ class GuardService {
     const providerScore = scoreProviderResults(providerResults);
     const enabledChecks = enabledChecksFromConfig(targetConfig);
     const providerReasons = providerReasonsForEnabledChecks(providerScore, enabledChecks);
+    const blockingProviderReasons = blockingProviderReasonsForEnabledChecks(providerScore, enabledChecks);
     const state = this.store.getState();
     const reasons = [];
     let staticObservation = { verdict: NetworkVerdict.PASS, reason: null, nextState: null };
@@ -420,10 +501,18 @@ class GuardService {
     }
     reasons.push(...providerReasons);
 
-    const allowTargetTraffic = reasons.length === 0;
+    const blockingReasons = Array.from(
+      new Set([...(staticObservation.reason ? [staticObservation.reason] : []), ...blockingProviderReasons])
+    );
+    const allowTargetTraffic = blockingReasons.length === 0;
+    const verdict = allowTargetTraffic
+      ? reasons.length
+        ? NetworkVerdict.WARN
+        : NetworkVerdict.PASS
+      : NetworkVerdict.BLOCK;
     const check = {
       checkedAt,
-      verdict: allowTargetTraffic ? NetworkVerdict.PASS : NetworkVerdict.BLOCK,
+      verdict,
       reasons: Array.from(new Set(reasons)),
       allowTargetTraffic,
       requestGate: {
@@ -449,7 +538,7 @@ class GuardService {
         countryCode: result.countryCode || null,
         regionName: result.regionName || null,
         asn: result.asn || null,
-        riskScore: result.riskScore || null,
+        riskScore: typeof result.riskScore === 'number' ? result.riskScore : null,
         ping0Purity: result.ping0Purity || null,
         sharedUsers: result.sharedUsers || null,
         sharedUsersMax: typeof result.sharedUsersMax === 'number' ? result.sharedUsersMax : null,
@@ -461,7 +550,7 @@ class GuardService {
         {
           id: 'request-exit',
           label: hasBoundStaticResidentialIp(targetConfig) ? '请求出口 IP' : '请求出口地区',
-          verdict: allowTargetTraffic ? 'PASS' : 'FAIL',
+          verdict: allowTargetTraffic ? (reasons.length ? 'WARN' : 'PASS') : 'FAIL',
           detail: hasBoundStaticResidentialIp(targetConfig)
             ? allowTargetTraffic
               ? `出口 IP 与静态住宅 IP 完全一致`
@@ -639,8 +728,50 @@ class GuardService {
     }
 
     const result = await this.proxyManager.enable();
+    this.proxy.setUpstreamProxy(result.upstreamProxy || null);
     this.store.update({ systemProxyApplied: result.applied === true });
     return result;
+  }
+
+  async enterBlockingGuardState({ mode, check, proxyError = null, eventType = 'guard-enabled-blocking' }) {
+    const failedCheck = proxyError
+      ? {
+          ...check,
+          checkedAt: new Date().toISOString(),
+          verdict: NetworkVerdict.BLOCK,
+          reasons: Array.from(new Set([...(check.reasons || []), CheckReason.SYSTEM_PROXY_NOT_APPLIED])),
+          allowTargetTraffic: false
+        }
+      : check;
+    this.stopProxyWatch();
+    this.store.update({
+      guardState: GuardState.ENABLED,
+      guardMode: this.normalizeGuardMode(mode),
+      systemProxyApplied: proxyError ? false : this.store.getState().systemProxyApplied,
+      actionRequired: {
+        type:
+          proxyError
+            ? CheckReason.SYSTEM_PROXY_NOT_APPLIED
+            : failedCheck.reasons && failedCheck.reasons[0]
+              ? failedCheck.reasons[0]
+              : 'NETWORK_CHECK_FAILED',
+        detail: proxyError ? proxyError.message || 'SYSTEM_PROXY_NOT_APPLIED' : undefined
+      },
+      lastCheck: failedCheck
+    });
+    const firewallResult = await this.syncFirewallForStatus();
+    const decoratedCheck = this.decorateCheckWithFirewall(this.store.getState().lastCheck || failedCheck, firewallResult);
+    this.store.update({ lastCheck: decoratedCheck });
+    this.clearRequestExitCheckCache();
+    const status = this.getStatus();
+    this.emit({
+      type: eventType,
+      proxyResult: proxyError ? { applied: false, error: proxyError.message || 'SYSTEM_PROXY_NOT_APPLIED' } : null,
+      firewallResult,
+      status,
+      check: decoratedCheck
+    });
+    return status;
   }
 
   async enableGuard(mode = GuardMode.AUTO, options = {}) {
@@ -698,20 +829,23 @@ class GuardService {
     }
 
     const preflightCheck = await this.checkNow();
-    if (preflightCheck.verdict !== NetworkVerdict.PASS || preflightCheck.allowTargetTraffic !== true) {
-      this.store.update({
-        guardState: GuardState.DISABLED,
-        actionRequired: {
-          type: preflightCheck.reasons && preflightCheck.reasons[0] ? preflightCheck.reasons[0] : 'NETWORK_CHECK_FAILED'
-        },
-        lastCheck: preflightCheck
-      });
-      const status = this.getStatus();
-      this.emit({ type: 'guard-enable-failed', status, check: preflightCheck });
-      return status;
+    if (preflightCheck.allowTargetTraffic !== true) {
+      try {
+        await this.setSystemProxyEnabled(true);
+        this.startProxyWatch();
+        return this.enterBlockingGuardState({ mode, check: preflightCheck });
+      } catch (error) {
+        return this.enterBlockingGuardState({ mode, check: preflightCheck, proxyError: error });
+      }
     }
 
-    const proxyResult = await this.setSystemProxyEnabled(true);
+    let proxyResult;
+    try {
+      proxyResult = await this.setSystemProxyEnabled(true);
+    } catch (error) {
+      return this.enterBlockingGuardState({ mode, check: preflightCheck, proxyError: error });
+    }
+    this.startProxyWatch();
     this.store.update({
       guardState: GuardState.ENABLED,
       guardMode: this.normalizeGuardMode(mode),
@@ -729,6 +863,8 @@ class GuardService {
 
   async disableGuard() {
     const proxyResult = await this.setSystemProxyEnabled(false);
+    this.proxy.setUpstreamProxy(null);
+    this.stopProxyWatch();
     this.store.update({ guardState: GuardState.DISABLED });
     const firewallResult = await this.syncFirewallForStatus();
     const status = this.getStatus();
@@ -749,9 +885,11 @@ class GuardService {
     };
 
     this.store.update({ guardState: GuardState.DISABLED, actionRequired: null });
+    this.stopProxyWatch();
 
     try {
       result.steps.proxy.result = await this.proxyManager.disable();
+      this.proxy.setUpstreamProxy(null);
       this.store.update({ systemProxyApplied: false });
     } catch (error) {
       result.ok = false;

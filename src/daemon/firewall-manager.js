@@ -477,16 +477,11 @@ module.exports = {
   FIREWALL_TARGET_HOSTS,
   HOSTS_BLOCK_START,
   HOSTS_BLOCK_END,
-  PF_ANCHOR_NAME,
   PF_ANCHOR_PATH,
-  PF_CONF_PATH,
   PF_CONF_BLOCK_START,
   PF_CONF_BLOCK_END,
   renderPfBlockRule,
   ensurePfAnchorBlock,
   removePfAnchorBlock,
-  isValidIpLiteral,
-  resolveTargetIps,
-  isWindowsElevated,
   FirewallManager
 };

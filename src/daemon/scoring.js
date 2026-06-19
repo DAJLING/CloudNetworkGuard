@@ -25,6 +25,9 @@ const CLAUDE_SUPPORTED_REGION_CODES = new Set([
 const PING0_RISK_SCORE_LIMIT = 30;
 const PING0_SHARED_USERS_LIMIT = 100;
 const PING0_SOURCE = 'ping0.cc';
+const PROXYCHECK_SOURCE = 'proxycheck.io';
+const RISK_DETAIL_SOURCES = new Set([PING0_SOURCE, PROXYCHECK_SOURCE]);
+const NON_BLOCKING_PROVIDER_REASONS = new Set([CheckReason.DATACENTER_IP]);
 const DEFAULT_ENABLED_CHECKS = Object.freeze({
   staticResidentialIp: true,
   ipType: true,
@@ -55,7 +58,7 @@ function isFiniteNumber(value) {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-function hasRequiredPing0RiskData(result) {
+function hasRequiredRiskData(result) {
   return Boolean(result && isFiniteNumber(result.riskScore) && isFiniteNumber(result.sharedUsersMax));
 }
 
@@ -75,6 +78,7 @@ function scoreProviderResults(providerResults) {
   let hasKnownRegion = false;
   let hasBlockedRegion = false;
   let ping0Result = null;
+  let fallbackRiskResult = null;
 
   if (usable.length === 0) {
     return {
@@ -106,8 +110,9 @@ function scoreProviderResults(providerResults) {
       countryCode = resultCountryCode;
     }
     if (result.regionName && result.regionName !== 'unknown') regionName = result.regionName;
-    if (result.source === PING0_SOURCE) {
-      ping0Result = result;
+    if (result.source === PING0_SOURCE) ping0Result = result;
+    if (RISK_DETAIL_SOURCES.has(result.source)) {
+      if (result.source === PROXYCHECK_SOURCE) fallbackRiskResult = result;
       ping0Purity = result.ping0Purity || ping0Purity;
       sharedUsers = result.sharedUsers || sharedUsers;
       if (isFiniteNumber(result.sharedUsersMax)) sharedUsersMax = result.sharedUsersMax;
@@ -122,12 +127,12 @@ function scoreProviderResults(providerResults) {
       riskScore += 45;
     }
 
-    if (result.source === PING0_SOURCE && isFiniteNumber(result.riskScore) && result.riskScore > PING0_RISK_SCORE_LIMIT) {
+    if (RISK_DETAIL_SOURCES.has(result.source) && isFiniteNumber(result.riskScore) && result.riskScore > PING0_RISK_SCORE_LIMIT) {
       reasons.add(CheckReason.VPN_OR_PROXY_RISK);
       riskScore += 45;
     }
 
-    if (result.source === PING0_SOURCE && isFiniteNumber(result.sharedUsersMax) && result.sharedUsersMax > PING0_SHARED_USERS_LIMIT) {
+    if (RISK_DETAIL_SOURCES.has(result.source) && isFiniteNumber(result.sharedUsersMax) && result.sharedUsersMax > PING0_SHARED_USERS_LIMIT) {
       reasons.add(CheckReason.IP_SHARED_USERS_RISK);
       riskScore += 45;
     }
@@ -142,7 +147,7 @@ function scoreProviderResults(providerResults) {
     }
   }
 
-  if (!hasRequiredPing0RiskData(ping0Result)) {
+  if (!hasRequiredRiskData(ping0Result) && !hasRequiredRiskData(fallbackRiskResult)) {
     reasons.add(CheckReason.IP_RISK_DATA_UNAVAILABLE);
     riskScore += 45;
   }
@@ -150,7 +155,7 @@ function scoreProviderResults(providerResults) {
     reasons.add(CheckReason.DATACENTER_IP);
     riskScore += 45;
   }
-  if (ipType !== 'residential') {
+  if (ipType !== 'residential' && ipType !== 'hosting' && ipType !== 'datacenter') {
     reasons.add(CheckReason.IP_TYPE_UNCONFIRMED);
     riskScore += 25;
   }
@@ -166,9 +171,28 @@ function scoreProviderResults(providerResults) {
   }
   riskScore = Math.min(100, Math.round(riskScore));
 
-  if (reasons.size > 0 || riskScore >= 65) {
+  const blockingReasons = Array.from(reasons).filter((reason) => !NON_BLOCKING_PROVIDER_REASONS.has(reason));
+  if (blockingReasons.length > 0 || (riskScore >= 65 && reasons.size === 0)) {
     return {
       verdict: NetworkVerdict.BLOCK,
+      reasons: Array.from(reasons),
+      riskScore,
+      confidence,
+      ip,
+      ipType,
+      asn,
+      countryCode,
+      regionName,
+      ping0Purity,
+      sharedUsers,
+      sharedUsersMax,
+      sources: providerResults
+    };
+  }
+
+  if (reasons.size > 0) {
+    return {
+      verdict: NetworkVerdict.WARN,
       reasons: Array.from(reasons),
       riskScore,
       confidence,
@@ -260,6 +284,12 @@ function providerReasonsForEnabledChecks(providerScore, enabledChecks) {
   return reasons;
 }
 
+function blockingProviderReasonsForEnabledChecks(providerScore, enabledChecks) {
+  return providerReasonsForEnabledChecks(providerScore, enabledChecks).filter(
+    (reason) => !NON_BLOCKING_PROVIDER_REASONS.has(reason)
+  );
+}
+
 function combineVerdicts({
   externalAccess = { ok: true, results: [] },
   providerScore = { verdict: NetworkVerdict.PASS, reasons: [] },
@@ -294,6 +324,7 @@ function combineVerdicts({
   const externalAccessEnabled = checks.dns || checks.tcp || checks.tls || checks.controlHosts;
   if (externalAccessEnabled && !externalAccess.ok) reasons.push(CheckReason.NO_EXTERNAL_ACCESS);
   const enabledProviderReasons = providerReasonsForEnabledChecks(providerScore, checks);
+  const blockingProviderReasons = blockingProviderReasonsForEnabledChecks(providerScore, checks);
   reasons.push(...enabledProviderReasons);
   if (checks.staticResidentialIp && staticObservation.reason) reasons.push(staticObservation.reason);
   if (checks.environment && environmentScore && environmentScore.reasons) reasons.push(...environmentScore.reasons);
@@ -303,7 +334,7 @@ function combineVerdicts({
 
   if (
     (externalAccessEnabled && !externalAccess.ok) ||
-    enabledProviderReasons.length > 0 ||
+    blockingProviderReasons.length > 0 ||
     (checks.staticResidentialIp && staticObservation && staticObservation.verdict === NetworkVerdict.BLOCK) ||
     (checks.environment && environmentScore && environmentScore.verdict === NetworkVerdict.BLOCK) ||
     (checks.webProbe && claudeWebScore && claudeWebScore.verdict === NetworkVerdict.BLOCK) ||
@@ -341,13 +372,10 @@ function combineVerdicts({
 }
 
 module.exports = {
-  BLOCKED_REGION_CODES,
-  PING0_RISK_SCORE_LIMIT,
-  PING0_SHARED_USERS_LIMIT,
   normalizeCountryCode,
-  isBlockedRegion,
   scoreProviderResults,
   normalizeEnabledChecks,
   providerReasonsForEnabledChecks,
+  blockingProviderReasonsForEnabledChecks,
   combineVerdicts
 };

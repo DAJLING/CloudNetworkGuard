@@ -1,5 +1,5 @@
 const path = require('path');
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, Notification, shell } = require('electron');
 const { GuardService } = require('../daemon/guard-service');
 const { GuardState } = require('../shared/constants');
 const { NotificationDeduper } = require('./notification-state');
@@ -7,7 +7,8 @@ const { NotificationDeduper } = require('./notification-state');
 let mainWindow = null;
 let tray = null;
 let service = null;
-const notificationDeduper = new NotificationDeduper();
+const blockingStatusDeduper = new NotificationDeduper();
+const blockedRequestDeduper = new NotificationDeduper();
 const appIconPath = path.join(__dirname, '../../assets/app-icon.png');
 
 // Prevent WebRTC from exposing RFC1918 local IPs during environment checks.
@@ -102,12 +103,27 @@ function broadcastStatus() {
   }
 }
 
-function notifyBlocked(event) {
-  if (!Notification.isSupported()) return;
-  const status = service.getStatus();
-  if (!notificationDeduper.shouldNotifyBlocked(status)) return;
+function attentionPulse() {
+  if (process.platform === 'darwin' && app.dock && typeof app.dock.bounce === 'function') {
+    app.dock.bounce('critical');
+  } else if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.flashFrame(true);
+  }
+}
 
-  const labels = {
+function showSystemNotification({ title, body }) {
+  attentionPulse();
+  if (!Notification.isSupported()) return;
+  new Notification({
+    title,
+    body,
+    silent: false,
+    urgency: 'critical'
+  }).show();
+}
+
+function reasonLabels() {
+  return {
     CHECK_PENDING: '正在校验，暂不放行',
     DNS_CHECK_FAILED: 'DNS 校验失败',
     TCP_CHECK_FAILED: 'TCP 连接校验失败',
@@ -131,13 +147,36 @@ function notifyBlocked(event) {
     BLACKLISTED: '黑名单命中',
     STATIC_WINDOW_PENDING: '静态 IP 观察不足 24 小时',
     IP_CHANGED: 'IP 已变化',
-    PROVIDER_UNAVAILABLE: '检测源不可用'
+    PROVIDER_UNAVAILABLE: '检测源不可用',
+    SYSTEM_PROXY_NOT_APPLIED: '系统代理未被守卫接管'
   };
-  const reasons = event.reasons && event.reasons.length ? event.reasons.map((reason) => labels[reason] || reason).join(', ') : 'UNKNOWN';
-  new Notification({
+}
+
+function formatReasons(reasons = []) {
+  const labels = reasonLabels();
+  return reasons.length ? reasons.map((reason) => labels[reason] || reason).join(', ') : 'UNKNOWN';
+}
+
+function notifyBlockedRequest(event) {
+  const status = service.getStatus();
+  if (!blockedRequestDeduper.shouldNotifyBlocked(status)) return;
+
+  showSystemNotification({
     title: 'Claude 请求已拦截',
-    body: `${event.host} 被阻断：${reasons}`
-  }).show();
+    body: `${event.host} 被阻断：${formatReasons(event.reasons)}`
+  });
+}
+
+function notifyBlockingStatus(event) {
+  const status = event.status || service.getStatus();
+  if (!blockingStatusDeduper.shouldNotifyBlocked(status)) return;
+  const check = status.lastCheck || {};
+  const guidance = status.guidance || {};
+  const reasonText = formatReasons(check.reasons || []);
+  showSystemNotification({
+    title: guidance.title ? `守卫已阻断：${guidance.title}` : '守卫已进入阻断保护',
+    body: reasonText ? `Claude 目标流量暂不放行：${reasonText}` : 'Claude 目标流量暂不放行。'
+  });
 }
 
 function wireIpc() {
@@ -166,6 +205,10 @@ function wireIpc() {
     const check = await service.checkNow();
     updateTray();
     return check;
+  });
+  ipcMain.handle('guard:open-ping0-verify', async () => {
+    await shell.openExternal('https://ping0.cc');
+    return { ok: true };
   });
   ipcMain.handle('guard:reload-rules', async () => {
     const status = await service.reloadTargetConfig();
@@ -246,8 +289,23 @@ app.whenReady().then(async () => {
   const originalEmit = service.emit.bind(service);
   service.emit = (event) => {
     originalEmit(event);
-    if (event.type === 'request-blocked') notifyBlocked(event);
-    else notificationDeduper.resetIfReleased(service.getStatus());
+    if (event.type === 'request-blocked') {
+      notifyBlockedRequest(event);
+    } else if (
+      [
+        'guard-enabled-blocking',
+        'check-complete',
+        'usage-rate-risk',
+        'system-proxy-lost',
+        'guard-enabled'
+      ].includes(event.type)
+    ) {
+      notifyBlockingStatus(event);
+    } else {
+      const status = service.getStatus();
+      blockingStatusDeduper.resetIfReleased(status);
+      blockedRequestDeduper.resetIfReleased(status);
+    }
     updateTray();
     broadcastStatus();
   };

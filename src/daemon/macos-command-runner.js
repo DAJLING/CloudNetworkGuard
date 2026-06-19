@@ -94,7 +94,6 @@ class MacCommandRunner {
 }
 
 module.exports = {
-  DEFAULT_TIMEOUT_MS,
   MacCommandRunner,
   quoteShellArg,
   joinShellCommand,

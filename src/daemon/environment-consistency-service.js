@@ -128,6 +128,5 @@ class EnvironmentConsistencyService {
 }
 
 module.exports = {
-  EnvironmentConsistencyService,
-  createPlatformApplier
+  EnvironmentConsistencyService
 };

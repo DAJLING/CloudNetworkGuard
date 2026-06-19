@@ -404,21 +404,15 @@ class TargetConfigManager {
 
 module.exports = {
   DEFAULT_VALIDATION_CHECKS,
-  CLAUDE_TARGET_SUFFIXES,
   STATIC_IP_SKIP_VALUE,
   TARGET_CONFIG_FILE,
-  defaultTargetConfig,
-  defaultTargetConfigPath,
   defaultValidation,
   deriveHostsFromRules,
   hasEnabledValidationChecks,
   hasTargetValidationChecks,
-  isClaudeHost,
   isValidIpv4,
   normalizeStaticResidentialIp,
   normalizeTargetConfig,
-  normalizeValidation,
-  normalizeWebProbeUrl,
   resolveValidationHosts,
   TargetConfigManager,
   VALIDATION_SERVICES

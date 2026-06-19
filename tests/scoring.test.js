@@ -63,6 +63,37 @@ test('scoreProviderResults lets Ping0 residential classification override hostin
   assert.equal(score.reasons.includes(CheckReason.DATACENTER_IP), false);
 });
 
+test('scoreProviderResults warns for datacenter IP without forcing a block', () => {
+  const score = scoreProviderResults([
+    safePing0({
+      ipType: 'datacenter',
+      countryCode: 'US',
+      regionName: 'United States',
+      isProxy: false,
+      isVpn: false,
+      isTor: false,
+      riskScore: 0
+    })
+  ]);
+
+  assert.equal(score.verdict, NetworkVerdict.WARN);
+  assert.equal(score.reasons.includes(CheckReason.DATACENTER_IP), true);
+  assert.equal(score.reasons.includes(CheckReason.IP_TYPE_UNCONFIRMED), false);
+});
+
+test('scoreProviderResults keeps datacenter-only risk as warning even when score crosses block threshold', () => {
+  const score = scoreProviderResults([
+    safePing0({
+      ipType: 'datacenter',
+      riskScore: 30
+    })
+  ]);
+
+  assert.equal(score.verdict, NetworkVerdict.WARN);
+  assert.equal(score.riskScore >= 65, true);
+  assert.deepEqual(score.reasons, [CheckReason.DATACENTER_IP]);
+});
+
 test('scoreProviderResults blocks mainland China, Hong Kong, and Macau regions', () => {
   for (const countryCode of ['CN', 'HK', 'MO']) {
     const score = scoreProviderResults([
@@ -205,6 +236,43 @@ test('scoreProviderResults blocks when Ping0 risk data is missing', () => {
   assert.equal(partialPing0.reasons.includes(CheckReason.IP_RISK_DATA_UNAVAILABLE), true);
 });
 
+test('scoreProviderResults accepts proxycheck risk data when Ping0 is unavailable', () => {
+  const score = scoreProviderResults([
+    {
+      source: 'fixture',
+      ip: '203.0.113.20',
+      ipType: 'residential',
+      countryCode: 'US',
+      regionName: 'United States',
+      isProxy: false,
+      isVpn: false,
+      isTor: false,
+      riskScore: 0,
+      confidence: 90
+    },
+    { source: 'ping0.cc', error: 'CAPTCHA_REQUIRED' },
+    {
+      source: 'proxycheck.io',
+      ip: '203.0.113.20',
+      ipType: 'residential',
+      countryCode: 'US',
+      regionName: 'United States',
+      isProxy: false,
+      isVpn: false,
+      isTor: false,
+      isBlacklisted: false,
+      riskScore: 12,
+      sharedUsers: '设备估计 8',
+      sharedUsersMax: 8,
+      confidence: 90
+    }
+  ]);
+
+  assert.equal(score.reasons.includes(CheckReason.IP_RISK_DATA_UNAVAILABLE), false);
+  assert.equal(score.verdict, NetworkVerdict.PASS);
+  assert.equal(score.sharedUsersMax, 8);
+});
+
 test('scoreProviderResults blocks when IP type is unknown', () => {
   const score = scoreProviderResults([safePing0({ ipType: 'unknown' })]);
 
@@ -332,6 +400,25 @@ test('combineVerdicts still blocks provider risk when static IP check is skipped
 
   assert.equal(combined.verdict, NetworkVerdict.BLOCK);
   assert.equal(combined.reasons.includes(CheckReason.VPN_OR_PROXY_RISK), true);
+});
+
+test('combineVerdicts allows datacenter IP with a warning reason', () => {
+  const combined = combineVerdicts({
+    externalAccess: { ok: true },
+    providerScore: {
+      verdict: NetworkVerdict.WARN,
+      reasons: [CheckReason.DATACENTER_IP],
+      ipType: 'datacenter'
+    },
+    staticObservation: {
+      verdict: NetworkVerdict.PASS,
+      reason: null
+    }
+  });
+
+  assert.equal(combined.verdict, NetworkVerdict.WARN);
+  assert.equal(combined.allowTargetTraffic, true);
+  assert.deepEqual(combined.reasons, [CheckReason.DATACENTER_IP]);
 });
 
 test('combineVerdicts ignores provider reasons for disabled validation items', () => {

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { mapIpWhoIs, mapIpApi, mapPing0Api, parsePing0Html, providerError, inferIpTypeFromText } = require('../src/daemon/providers');
+const { mapIpWhoIs, mapIpApi, mapProxyCheck, mapPing0Api, parsePing0Html, providerError, inferIpTypeFromText } = require('../src/daemon/providers');
 
 test('mapIpWhoIs carries region metadata for blocked-region scoring', () => {
   const mapped = mapIpWhoIs({
@@ -62,6 +62,67 @@ test('mapPing0Api maps risk, sharing, location, and IP type metadata', () => {
   assert.equal(mapped.riskScore, 12);
   assert.equal(mapped.sharedUsers, '10 - 100 (一般)');
   assert.equal(mapped.sharedUsersMax, 100);
+});
+
+test('mapProxyCheck maps risk and device estimate as Ping0 fallback metadata', () => {
+  const mapped = mapProxyCheck(
+    {
+      status: 'ok',
+      '203.0.113.44': {
+        network: {
+          asn: 'AS6079',
+          provider: 'RCN',
+          organisation: 'RCN',
+          type: 'ISP'
+        },
+        location: {
+          country_name: 'United States',
+          country_code: 'US',
+          region_name: 'New York'
+        },
+        device_estimate: {
+          address: 8,
+          subnet: 40
+        },
+        detections: {
+          proxy: false,
+          vpn: false,
+          tor: false,
+          hosting: false,
+          compromised: false,
+          risk: 12,
+          confidence: 90
+        }
+      }
+    },
+    '203.0.113.44'
+  );
+
+  assert.equal(mapped.source, 'proxycheck.io');
+  assert.equal(mapped.ipType, 'residential');
+  assert.equal(mapped.countryCode, 'US');
+  assert.equal(mapped.riskScore, 12);
+  assert.equal(mapped.sharedUsersMax, 8);
+  assert.equal(mapped.ping0Purity, '低风险');
+});
+
+test('mapProxyCheck derives risk score from detection flags when risk is absent', () => {
+  const mapped = mapProxyCheck(
+    {
+      status: 'ok',
+      '203.0.113.45': {
+        network: { asn: 'AS64500', provider: 'Example VPN', type: 'Business' },
+        location: { country_code: 'US', country_name: 'United States' },
+        device_estimate: { address: 3 },
+        detections: { proxy: true, vpn: true, tor: false, hosting: false, confidence: 80 }
+      }
+    },
+    '203.0.113.45'
+  );
+
+  assert.equal(mapped.riskScore, 80);
+  assert.equal(mapped.isProxy, true);
+  assert.equal(mapped.isVpn, true);
 });
 
 test('mapPing0Api accepts alternate Ping0 risk and sharing field names', () => {

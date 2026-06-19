@@ -37,6 +37,5 @@ async function probeClaudeWeb(fetchImpl = fetch, url = 'https://claude.ai/') {
 }
 
 module.exports = {
-  headerValue,
   probeClaudeWeb
 };

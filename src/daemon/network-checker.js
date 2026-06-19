@@ -385,11 +385,11 @@ function buildCheckItems({ targetConfig, externalAccess, providerScore, staticOb
       checkItem(
         'ip-type',
         'IP 类型',
-        providerUnavailable || providerReasons.has(CheckReason.DATACENTER_IP) || providerReasons.has(CheckReason.IP_TYPE_UNCONFIRMED)
+        providerUnavailable || providerReasons.has(CheckReason.IP_TYPE_UNCONFIRMED)
           ? 'FAIL'
-          : providerScore.ipType === 'residential'
-            ? 'PASS'
-            : 'WARN',
+          : providerReasons.has(CheckReason.DATACENTER_IP) || providerScore.ipType !== 'residential'
+            ? 'WARN'
+            : 'PASS',
         ipTypeDetail,
         providerUnavailable
           ? CheckReason.PROVIDER_UNAVAILABLE
@@ -428,18 +428,22 @@ function buildCheckItems({ targetConfig, externalAccess, providerScore, staticOb
       CheckReason.IP_SHARED_USERS_RISK,
       CheckReason.BLACKLISTED
     ].find((reason) => providerReasons.has(reason));
-    const ping0 = Array.isArray(providerScore.sources) ? providerScore.sources.find((result) => result && result.source === 'ping0.cc' && !result.error) : null;
-    const ping0Detail =
-      ping0 && (typeof ping0.riskScore === 'number' || ping0.sharedUsers)
-        ? `Ping0 风控 ${typeof ping0.riskScore === 'number' ? ping0.riskScore : '--'}${ping0.ping0Purity ? ` / ${ping0.ping0Purity}` : ''}，共享人数 ${ping0.sharedUsers || '--'}`
+    const riskSource = Array.isArray(providerScore.sources)
+      ? providerScore.sources.find((result) => result && result.source === 'ping0.cc' && !result.error) ||
+        providerScore.sources.find((result) => result && result.source === 'proxycheck.io' && !result.error)
+      : null;
+    const riskSourceName = riskSource && riskSource.source === 'proxycheck.io' ? 'Proxycheck' : 'Ping0';
+    const riskDetail =
+      riskSource && (typeof riskSource.riskScore === 'number' || riskSource.sharedUsers)
+        ? `${riskSourceName} 风控 ${typeof riskSource.riskScore === 'number' ? riskSource.riskScore : '--'}${riskSource.ping0Purity ? ` / ${riskSource.ping0Purity}` : ''}，共享人数 ${riskSource.sharedUsers || '--'}`
         : null;
-    let proxyRiskDetail = ping0Detail || '未发现代理风险';
+    let proxyRiskDetail = riskDetail || '未发现代理风险';
     if (proxyRiskReason === CheckReason.PROVIDER_UNAVAILABLE) {
       proxyRiskDetail = summarizeProviderErrors(providerScore);
     } else if (proxyRiskReason === CheckReason.IP_RISK_DATA_UNAVAILABLE) {
-      proxyRiskDetail = ping0Detail || summarizeProviderErrors(providerScore) || 'Ping0 未返回风控值或 IP 共享人数';
+      proxyRiskDetail = riskDetail || summarizeProviderErrors(providerScore) || 'Ping0 未返回完整风控值或 IP 共享人数，请打开 Ping0 完成人工验证后重新检测';
     } else if (proxyRiskReason) {
-      proxyRiskDetail = ping0Detail || '检测到代理/VPN/Tor、共享人数或黑名单风险';
+      proxyRiskDetail = riskDetail || '检测到代理/VPN/Tor、共享人数或黑名单风险';
     }
     items.push(
       checkItem(
@@ -700,7 +704,7 @@ class NetworkChecker {
       enabledChecks
     });
 
-    if (enabledChecks.webProbe && targetConfig.webProbeUrl && combined.verdict === NetworkVerdict.PASS) {
+    if (enabledChecks.webProbe && targetConfig.webProbeUrl && combined.allowTargetTraffic === true) {
       claudeWeb = await this.claudeWebProbe(undefined, targetConfig.webProbeUrl);
       combined = combineVerdicts({
         externalAccess,
@@ -747,7 +751,7 @@ class NetworkChecker {
         countryCode: result.countryCode || null,
         regionName: result.regionName || null,
         asn: result.asn || null,
-        riskScore: result.riskScore || null,
+        riskScore: typeof result.riskScore === 'number' ? result.riskScore : null,
         ping0Purity: result.ping0Purity || null,
         sharedUsers: result.sharedUsers || null,
         sharedUsersMax: typeof result.sharedUsersMax === 'number' ? result.sharedUsersMax : null,
@@ -792,13 +796,7 @@ class NetworkChecker {
 }
 
 module.exports = {
-  TARGET_HEALTH_HOSTS,
-  CLAUDE_CONTROL_HOSTS,
   dnsProbe,
-  tcpProbe,
-  tlsProbe,
-  checkExternalAccess,
-  checkExitBinding,
   enabledChecksFromConfig,
   evaluateStaticResidentialIp,
   buildCheckItems,

@@ -5,10 +5,20 @@ const { URL } = require('url');
 const { isGuardedTarget } = require('./rules');
 const { GuardState } = require('../shared/constants');
 
+function normalizeUpstreamProxy(proxy) {
+  if (!proxy || !proxy.host || !proxy.port) return null;
+  return {
+    protocol: proxy.protocol || 'http:',
+    host: String(proxy.host),
+    port: Number(proxy.port)
+  };
+}
+
 class GuardProxy {
-  constructor({ port = 18089, host = '127.0.0.1', getStatus, getTargetRules, onTargetRequest, emitEvent }) {
+  constructor({ port = 18089, host = '127.0.0.1', upstreamProxy = null, getStatus, getTargetRules, onTargetRequest, emitEvent }) {
     this.port = port;
     this.host = host;
+    this.upstreamProxy = normalizeUpstreamProxy(upstreamProxy);
     this.getStatus = getStatus;
     this.getTargetRules = getTargetRules || (() => undefined);
     this.onTargetRequest = onTargetRequest || (async () => ({ block: false, reasons: [] }));
@@ -31,6 +41,10 @@ class GuardProxy {
     return new Promise((resolve) => {
       this.server.close(() => resolve());
     });
+  }
+
+  setUpstreamProxy(proxy) {
+    this.upstreamProxy = normalizeUpstreamProxy(proxy);
   }
 
   shouldBlock(host) {
@@ -75,6 +89,11 @@ class GuardProxy {
       return;
     }
 
+    if (this.upstreamProxy) {
+      this.tunnelViaUpstreamProxy(request.url, clientSocket, head);
+      return;
+    }
+
     const upstream = net.connect(Number(port), host, () => {
       clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
       if (head && head.length) upstream.write(head);
@@ -82,6 +101,42 @@ class GuardProxy {
       clientSocket.pipe(upstream);
     });
 
+    upstream.on('error', () => clientSocket.destroy());
+    clientSocket.on('error', () => upstream.destroy());
+  }
+
+  tunnelViaUpstreamProxy(authority, clientSocket, head) {
+    const upstream = net.connect(this.upstreamProxy.port, this.upstreamProxy.host, () => {
+      upstream.write(`CONNECT ${authority} HTTP/1.1\r\nHost: ${authority}\r\nProxy-Connection: Keep-Alive\r\n\r\n`);
+    });
+
+    let buffered = Buffer.alloc(0);
+    const onData = (chunk) => {
+      buffered = Buffer.concat([buffered, chunk]);
+      const headerEnd = buffered.indexOf('\r\n\r\n');
+      if (headerEnd === -1) return;
+
+      const header = buffered.subarray(0, headerEnd).toString('latin1');
+      const rest = buffered.subarray(headerEnd + 4);
+      const statusMatch = header.match(/^HTTP\/\d(?:\.\d)?\s+(\d+)/i);
+      const statusCode = statusMatch ? Number(statusMatch[1]) : 502;
+      upstream.off('data', onData);
+
+      if (statusCode < 200 || statusCode >= 300) {
+        clientSocket.write(`HTTP/1.1 ${statusCode} Upstream Proxy Error\r\n\r\n`);
+        clientSocket.destroy();
+        upstream.destroy();
+        return;
+      }
+
+      clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+      if (head && head.length) upstream.write(head);
+      if (rest.length) clientSocket.write(rest);
+      upstream.pipe(clientSocket);
+      clientSocket.pipe(upstream);
+    };
+
+    upstream.on('data', onData);
     upstream.on('error', () => clientSocket.destroy());
     clientSocket.on('error', () => upstream.destroy());
   }
@@ -108,16 +163,26 @@ class GuardProxy {
       return;
     }
 
-    const transport = targetUrl.protocol === 'https:' ? https : http;
+    const useUpstreamProxy = Boolean(this.upstreamProxy);
+    const transport = useUpstreamProxy ? http : targetUrl.protocol === 'https:' ? https : http;
     const upstreamRequest = transport.request(
-      {
-        protocol: targetUrl.protocol,
-        hostname: targetUrl.hostname,
-        port: targetUrl.port || (targetUrl.protocol === 'https:' ? 443 : 80),
-        path: `${targetUrl.pathname}${targetUrl.search}`,
-        method: clientRequest.method,
-        headers: clientRequest.headers
-      },
+      useUpstreamProxy
+        ? {
+            protocol: this.upstreamProxy.protocol,
+            hostname: this.upstreamProxy.host,
+            port: this.upstreamProxy.port,
+            path: clientRequest.url,
+            method: clientRequest.method,
+            headers: clientRequest.headers
+          }
+        : {
+            protocol: targetUrl.protocol,
+            hostname: targetUrl.hostname,
+            port: targetUrl.port || (targetUrl.protocol === 'https:' ? 443 : 80),
+            path: `${targetUrl.pathname}${targetUrl.search}`,
+            method: clientRequest.method,
+            headers: clientRequest.headers
+          },
       (upstreamResponse) => {
         clientResponse.writeHead(upstreamResponse.statusCode || 502, upstreamResponse.headers);
         upstreamResponse.pipe(clientResponse);

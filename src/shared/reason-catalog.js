@@ -38,6 +38,13 @@ const reasonCatalog = Object.freeze({
     explanation: '当前无法从外部检测源确认 IP 类型、地区或代理风险。守卫会保持谨慎阻断。',
     actions: [action('retry-check', '稍后重试', 'primary'), action('view-report', '查看详情')]
   },
+  [CheckReason.SYSTEM_PROXY_NOT_APPLIED]: {
+    priority: 92,
+    severity: 'block',
+    title: '系统代理未被守卫接管',
+    explanation: '系统代理被其他网络工具覆盖，Claude 流量可能绕过守卫。守卫会保持阻断保护。',
+    actions: [action('retry-check', '重新接管', 'primary'), action('restore-network', '恢复网络')]
+  },
   [CheckReason.BLOCKED_REGION]: {
     priority: 90,
     severity: 'block',
@@ -47,7 +54,7 @@ const reasonCatalog = Object.freeze({
   },
   [CheckReason.DATACENTER_IP]: {
     priority: 85,
-    severity: 'block',
+    severity: 'warning',
     title: '检测到数据中心 IP',
     explanation: '当前出口更像云服务器或机房网络，而不是稳定住宅网络。',
     actions: [action('retry-check', '重新检测'), action('view-report', '查看来源')]
@@ -78,7 +85,7 @@ const reasonCatalog = Object.freeze({
     severity: 'block',
     title: 'Ping0 风控数据不可用',
     explanation: '当前未能从 Ping0 拿到风控值、纯净度或 IP 共享人数。缺少这些字段时无法确认出口是否适合安全使用 Claude。',
-    actions: [action('retry-check', '重新检测', 'primary'), action('view-report', '查看来源')]
+    actions: [action('open-ping0-verify', '打开 Ping0 验证', 'primary'), action('retry-check', '重新检测'), action('view-report', '查看来源')]
   },
   [CheckReason.BLACKLISTED]: {
     priority: 85,
@@ -199,7 +206,12 @@ function getReasonGuidance(reason) {
 
 function getTopReasonGuidance(reasons = []) {
   const guidance = reasons.length ? reasons.map(getReasonGuidance) : [getReasonGuidance(CheckReason.CHECK_PENDING)];
-  return guidance.sort((a, b) => b.priority - a.priority)[0];
+  const severityRank = { block: 3, warning: 2, info: 1 };
+  return guidance.sort((a, b) => {
+    const severityDelta = (severityRank[b.severity] || 0) - (severityRank[a.severity] || 0);
+    if (severityDelta) return severityDelta;
+    return b.priority - a.priority;
+  })[0];
 }
 
 module.exports = {

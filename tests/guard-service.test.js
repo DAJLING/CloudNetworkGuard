@@ -84,7 +84,7 @@ test('GuardService runs full network check before enabling when risk is accepted
   delete process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY;
 });
 
-test('GuardService keeps guard disabled when preflight check fails', async () => {
+test('GuardService enables guard in blocking mode when preflight check fails', async () => {
   process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY = '1';
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
   const store = new Store(path.join(tmp, 'state.json'));
@@ -110,12 +110,32 @@ test('GuardService keeps guard disabled when preflight check fails', async () =>
   };
 
   const status = await service.enableGuard('AUTO', { acceptNoStaticIpRisk: true });
-  assert.equal(status.guardState, GuardState.DISABLED);
+  assert.equal(status.guardState, GuardState.ENABLED);
+  assert.equal(status.lastCheck.allowTargetTraffic, false);
   assert.equal(events.includes('check'), true);
-  assert.equal(events.includes('apply'), false);
-  assert.equal(events.includes('clear'), true);
+  assert.equal(events.includes('apply'), true);
   assert.equal(store.getState().checkingNetwork, false);
   delete process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY;
+});
+
+test('GuardService fails closed when system proxy cannot be applied during enable', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
+  const store = new Store(path.join(tmp, 'state.json'));
+  const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
+  service.setStaticResidentialIp('0.0.0.0');
+  service.checker.checkNow = async () => passCheck();
+  service.proxyManager.enable = async () => {
+    throw new Error('Wi-Fi: HTTPS 127.0.0.1:7897');
+  };
+  service.firewallManager.applyBlock = async () => ({ mode: 'PF_BLOCK', rules: [{ anchor: 'fixture' }], lastError: null });
+
+  const status = await service.enableGuard('AUTO', { acceptNoStaticIpRisk: true });
+
+  assert.equal(status.guardState, GuardState.ENABLED);
+  assert.equal(status.lastCheck.allowTargetTraffic, false);
+  assert.equal(status.lastCheck.reasons.includes(CheckReason.SYSTEM_PROXY_NOT_APPLIED), true);
+  assert.equal(status.actionRequired.type, CheckReason.SYSTEM_PROXY_NOT_APPLIED);
+  assert.equal(status.firewall.mode, 'PF_BLOCK');
 });
 
 test('shouldUseSystemProxy is false on Windows unless explicitly enabled', () => {
@@ -292,6 +312,35 @@ test('GuardService skips static residential IP preflight when that check is disa
   delete process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY;
 });
 
+test('GuardService enables guard with datacenter IP warning when traffic is allowed', async () => {
+  process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY = '1';
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
+  const store = new Store(path.join(tmp, 'state.json'));
+  const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
+  service.firewallManager.clearBlock = async () => ({ mode: 'CLEARED', rules: [] });
+  service.checker.providers = async () => [safePing0({ ipType: 'datacenter' })];
+  service.checker.externalAccessCheck = async () => ({ ok: true, claudeControlOk: true, results: [] });
+  service.checker.claudeWebProbe = async () => ({ verdict: 'PASS', reasons: [], skipped: true });
+  service.checker.browserWebRtcCheck = async () => ({ supported: true, ok: true, requiredPolicy: 'disable_non_proxied_udp', browsers: [] });
+  service.checker.environmentCheck = () => ({ verdict: 'PASS', reasons: [], timeZone: 'America/New_York', language: 'en-US' });
+  await service.saveValidationConfig({
+    services: { claude: true },
+    checks: { ...DEFAULT_VALIDATION_CHECKS, staticResidentialIp: false },
+    webProbe: { enabled: false, url: '' },
+    useCustomHosts: false
+  });
+
+  const status = await service.enableGuard('AUTO', { acceptNoStaticIpRisk: true });
+
+  assert.equal(status.guardState, GuardState.ENABLED);
+  assert.equal(status.lastCheck.verdict, 'WARN');
+  assert.equal(status.lastCheck.allowTargetTraffic, true);
+  assert.equal(status.lastCheck.reasons.includes(CheckReason.DATACENTER_IP), true);
+  assert.equal(status.lastCheck.checkItems.find((item) => item.id === 'ip-type').verdict, 'WARN');
+
+  delete process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY;
+});
+
 test('GuardService keeps guard disabled when every validation check is disabled', async () => {
   process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY = '1';
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
@@ -354,6 +403,51 @@ test('GuardService allows matching target request from supported region without 
   delete process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY;
 });
 
+test('GuardService allows target request from datacenter IP while recording warning', async () => {
+  process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY = '1';
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
+  const store = new Store(path.join(tmp, 'state.json'));
+  const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
+  service.firewallManager.clearBlock = async () => ({ mode: 'CLEARED', rules: [] });
+  service.checker.checkNow = async () => passCheck();
+  service.checker.providers = async () => [safePing0({ ipType: 'datacenter' })];
+
+  await service.enableGuard('AUTO', { acceptNoStaticIpRisk: true });
+  const decision = await service.evaluateGuardedTargetRequest('claude.ai');
+
+  assert.equal(decision.block, false);
+  assert.equal(store.getState().lastCheck.verdict, 'WARN');
+  assert.equal(store.getState().lastCheck.allowTargetTraffic, true);
+  assert.equal(store.getState().lastCheck.reasons.includes(CheckReason.DATACENTER_IP), true);
+
+  delete process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY;
+});
+
+test('GuardService blocks target request while current guard status disallows traffic', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
+  const store = new Store(path.join(tmp, 'state.json'));
+  const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
+  let providerCalls = 0;
+  service.checker.providers = async () => {
+    providerCalls += 1;
+    return [safePing0()];
+  };
+  store.update({
+    guardState: GuardState.ENABLED,
+    lastCheck: passCheck({
+      verdict: 'BLOCK',
+      reasons: ['ENVIRONMENT_MISMATCH'],
+      allowTargetTraffic: false
+    })
+  });
+
+  const decision = await service.evaluateGuardedTargetRequest('claude.ai');
+
+  assert.equal(decision.block, true);
+  assert.deepEqual(decision.reasons, ['ENVIRONMENT_MISMATCH']);
+  assert.equal(providerCalls, 0);
+});
+
 test('GuardService blocks target request when Ping0 risk data is unavailable', async () => {
   process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY = '1';
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
@@ -404,6 +498,42 @@ test('GuardService blocks matching target request from unsupported Claude region
   assert.equal(decision.block, true);
   assert.deepEqual(decision.reasons, ['BLOCKED_REGION']);
   assert.equal(store.getState().lastCheck.allowTargetTraffic, false);
+
+  delete process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY;
+});
+
+test('GuardService rechecks request exit after an allowed request inside the cache window', async () => {
+  process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY = '1';
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
+  const store = new Store(path.join(tmp, 'state.json'));
+  const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
+  const firewallModes = [];
+  service.firewallManager.clearBlock = async () => {
+    firewallModes.push('CLEARED');
+    return { mode: 'CLEARED', rules: [] };
+  };
+  service.firewallManager.applyBlock = async () => {
+    firewallModes.push('BLOCK');
+    return { mode: 'BLOCK', rules: [{ name: 'fixture', remoteIp: '198.51.100.10' }] };
+  };
+  service.checker.checkNow = async () => passCheck();
+  const providerResponses = [
+    [safePing0()],
+    [safePing0({ ip: '198.51.100.10', countryCode: 'CN', regionName: 'China' })]
+  ];
+  let providerCalls = 0;
+  service.checker.providers = async () => providerResponses[providerCalls++] || providerResponses.at(-1);
+
+  await service.enableGuard('AUTO', { acceptNoStaticIpRisk: true });
+  const allowed = await service.evaluateGuardedTargetRequest('claude.ai');
+  const blocked = await service.evaluateGuardedTargetRequest('claude.ai');
+
+  assert.equal(allowed.block, false);
+  assert.equal(blocked.block, true);
+  assert.deepEqual(blocked.reasons, ['BLOCKED_REGION']);
+  assert.equal(providerCalls, 2);
+  assert.equal(store.getState().lastCheck.allowTargetTraffic, false);
+  assert.equal(firewallModes.includes('BLOCK'), true);
 
   delete process.env.NETWORK_GUARD_SKIP_SYSTEM_PROXY;
 });
@@ -667,4 +797,58 @@ test('GuardService runMonitoringTick is disabled and does not run checks', async
   assert.equal(calls, 0);
   assert.equal(monitoring.enabled, false);
   assert.equal(monitoring.lastError, null);
+});
+
+test('GuardService reapplies mac system proxy when it drifts while guard is enabled', async () => {
+  if (process.platform !== 'darwin') return;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
+  const store = new Store(path.join(tmp, 'state.json'));
+  const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
+  store.update({
+    guardState: GuardState.ENABLED,
+    systemProxyApplied: true,
+    lastCheck: passCheck()
+  });
+  service.proxyManager.verifyMacProxyApplied = async () => ({ ok: false, results: [{ service: 'Wi-Fi', ok: false }] });
+  let reapplyCalls = 0;
+  service.setSystemProxyEnabled = async (enabled) => {
+    reapplyCalls += 1;
+    assert.equal(enabled, true);
+    service.proxy.setUpstreamProxy({ host: '127.0.0.1', port: 7897 });
+    store.update({ systemProxyApplied: true });
+    return { applied: true, upstreamProxy: { host: '127.0.0.1', port: 7897 } };
+  };
+
+  const result = await service.ensureSystemProxyStillApplied();
+
+  assert.equal(result.ok, true);
+  assert.equal(reapplyCalls, 1);
+  assert.equal(service.getStatus().proxy.upstream.port, 7897);
+  assert.equal(store.getState().logs[0].type, 'system-proxy-reapplied');
+});
+
+test('GuardService fails closed when mac system proxy cannot be reapplied', async () => {
+  if (process.platform !== 'darwin') return;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'network-guard-'));
+  const store = new Store(path.join(tmp, 'state.json'));
+  const service = new GuardService({ store, apiPort: 0, proxyPort: 0 });
+  store.update({
+    guardState: GuardState.ENABLED,
+    systemProxyApplied: true,
+    lastCheck: passCheck()
+  });
+  service.proxyManager.verifyMacProxyApplied = async () => ({ ok: false, results: [{ service: 'Wi-Fi', ok: false }] });
+  service.setSystemProxyEnabled = async () => {
+    throw new Error('Wi-Fi: HTTP 127.0.0.1:7897');
+  };
+  service.firewallManager.applyBlock = async () => ({ mode: 'PF_BLOCK', rules: [{ anchor: 'fixture' }], lastError: null });
+
+  const result = await service.ensureSystemProxyStillApplied();
+  const status = service.getStatus();
+
+  assert.equal(result.ok, false);
+  assert.equal(status.lastCheck.allowTargetTraffic, false);
+  assert.equal(status.lastCheck.reasons.includes('SYSTEM_PROXY_NOT_APPLIED'), true);
+  assert.equal(status.firewall.mode, 'PF_BLOCK');
+  assert.equal(status.actionRequired.type, 'SYSTEM_PROXY_NOT_APPLIED');
 });

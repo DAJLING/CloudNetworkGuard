@@ -23,8 +23,5 @@ function recordTargetUsage({ state, host, now = Date.now(), windowMs = DEFAULT_U
 }
 
 module.exports = {
-  DEFAULT_USAGE_WINDOW_MS,
-  DEFAULT_MAX_TARGET_REQUESTS,
-  pruneUsageEvents,
   recordTargetUsage
 };

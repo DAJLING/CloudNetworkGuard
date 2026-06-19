@@ -26,3 +26,17 @@ test('getTopReasonGuidance picks the highest-priority reason', () => {
 
   assert.equal(guidance.reason, 'STATIC_RESIDENTIAL_IP_MISMATCH');
 });
+
+test('getTopReasonGuidance puts warning-only IP type guidance behind blocking errors', () => {
+  const guidance = getTopReasonGuidance([CheckReason.DATACENTER_IP, CheckReason.ENVIRONMENT_MISMATCH]);
+
+  assert.equal(reasonCatalog[CheckReason.DATACENTER_IP].severity, 'warning');
+  assert.equal(guidance.reason, CheckReason.ENVIRONMENT_MISMATCH);
+});
+
+test('Ping0 risk data guidance opens manual verification first', () => {
+  const guidance = getReasonGuidance(CheckReason.IP_RISK_DATA_UNAVAILABLE);
+
+  assert.equal(guidance.actions[0].id, 'open-ping0-verify');
+  assert.equal(guidance.actions[0].tone, 'primary');
+});

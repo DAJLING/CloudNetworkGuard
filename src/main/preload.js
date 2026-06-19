@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('networkGuard', {
   reopenSetup: () => ipcRenderer.invoke('guard:reopen-setup'),
   getDiagnosticReport: () => ipcRenderer.invoke('guard:get-diagnostic-report'),
   checkNow: () => ipcRenderer.invoke('guard:check-now'),
+  openPing0Verify: () => ipcRenderer.invoke('guard:open-ping0-verify'),
   reloadRules: () => ipcRenderer.invoke('guard:reload-rules'),
   saveValidationConfig: (validation) => ipcRenderer.invoke('guard:save-validation-config', validation),
   saveTargetRules: (rules) => ipcRenderer.invoke('guard:save-target-rules', rules),

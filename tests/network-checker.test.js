@@ -197,6 +197,79 @@ test('NetworkChecker reuses cached Ping0 risk data for the same exit IP when CAP
   assert.equal(ping0.sharedUsersMax, 10);
 });
 
+test('NetworkChecker uses proxycheck risk data when Ping0 is blocked by CAPTCHA', async () => {
+  const { store } = createMemoryStore();
+  const checker = new NetworkChecker({
+    store,
+    providers: async () => [
+      {
+        source: 'ip-api.com',
+        ip: '203.0.113.10',
+        ipType: 'residential',
+        countryCode: 'US',
+        regionName: 'United States',
+        isProxy: false,
+        isVpn: false,
+        isTor: false,
+        riskScore: 0,
+        confidence: 30
+      },
+      { source: 'ping0.cc', error: 'PING0_CAPTCHA_REQUIRED' },
+      {
+        source: 'proxycheck.io',
+        ip: '203.0.113.10',
+        ipType: 'residential',
+        countryCode: 'US',
+        regionName: 'United States',
+        isProxy: false,
+        isVpn: false,
+        isTor: false,
+        isBlacklisted: false,
+        riskScore: 12,
+        ping0Purity: '低风险',
+        sharedUsers: '设备估计 8',
+        sharedUsersMax: 8,
+        confidence: 90
+      }
+    ],
+    externalAccessCheck: async () => ({ ok: true, claudeControlOk: true, results: [] }),
+    claudeWebProbe: async () => ({ verdict: 'PASS', reasons: [], status: 200 }),
+    browserWebRtcCheck: async () => ({ supported: true, ok: true, requiredPolicy: 'disable_non_proxied_udp', browsers: [] }),
+    environmentCheck: () => ({ verdict: 'PASS', reasons: [], timeZone: 'America/New_York', language: 'en-US' }),
+    getTargetConfig: () => ({
+      validation: {
+        services: { claude: true },
+        checks: {
+          staticResidentialIp: false,
+          ipType: true,
+          region: true,
+          proxyRisk: true,
+          dns: false,
+          tcp: false,
+          tls: false,
+          controlHosts: false,
+          environment: true,
+          exitBinding: false,
+          usageRate: false
+        },
+        webProbe: { enabled: true, url: 'https://claude.ai/' }
+      },
+      healthCheckHosts: [],
+      controlHosts: [],
+      webProbeUrl: 'https://claude.ai/',
+      staticResidentialIp: ''
+    }),
+    now: () => 1000
+  });
+
+  const check = await checker.checkNow();
+  const proxyRisk = check.checkItems.find((item) => item.id === 'proxy-risk');
+
+  assert.equal(check.reasons.includes(CheckReason.IP_RISK_DATA_UNAVAILABLE), false);
+  assert.equal(check.verdict, 'PASS');
+  assert.match(proxyRisk.detail, /Proxycheck 风控 12/);
+});
+
 test('NetworkChecker runs Claude Web probe after prechecks pass', async () => {
   const { store } = createMemoryStore();
   let webProbeCalls = 0;
@@ -239,6 +312,54 @@ test('NetworkChecker runs Claude Web probe after prechecks pass', async () => {
   const check = await checker.checkNow();
 
   assert.equal(check.verdict, 'PASS');
+  assert.equal(webProbeCalls, 1);
+  assert.equal(check.claudeWeb.status, 200);
+});
+
+test('NetworkChecker runs Claude Web probe when prechecks only warn for datacenter IP', async () => {
+  const { store } = createMemoryStore();
+  let webProbeCalls = 0;
+  const checker = new NetworkChecker({
+    store,
+    providers: async () => [safePing0({ ipType: 'datacenter' })],
+    externalAccessCheck: async () => ({ ok: true, claudeControlOk: true, results: [] }),
+    claudeWebProbe: async () => {
+      webProbeCalls += 1;
+      return { verdict: 'PASS', reasons: [], status: 200 };
+    },
+    browserWebRtcCheck: async () => ({ supported: true, ok: true, requiredPolicy: 'disable_non_proxied_udp', browsers: [] }),
+    environmentCheck: () => ({ verdict: 'PASS', reasons: [], timeZone: 'America/New_York', language: 'en-US' }),
+    getTargetConfig: () => ({
+      validation: {
+        services: { claude: true },
+        checks: {
+          staticResidentialIp: false,
+          ipType: true,
+          region: true,
+          proxyRisk: true,
+          dns: false,
+          tcp: false,
+          tls: false,
+          controlHosts: false,
+          environment: true,
+          exitBinding: false,
+          usageRate: false
+        },
+        webProbe: { enabled: true, url: 'https://claude.ai/' }
+      },
+      healthCheckHosts: [],
+      controlHosts: [],
+      webProbeUrl: 'https://claude.ai/',
+      staticResidentialIp: ''
+    }),
+    now: () => 1000
+  });
+
+  const check = await checker.checkNow();
+
+  assert.equal(check.verdict, 'WARN');
+  assert.equal(check.allowTargetTraffic, true);
+  assert.equal(check.reasons.includes(CheckReason.DATACENTER_IP), true);
   assert.equal(webProbeCalls, 1);
   assert.equal(check.claudeWeb.status, 200);
 });

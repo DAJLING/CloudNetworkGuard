@@ -281,6 +281,49 @@ function mapIpApi(data) {
   };
 }
 
+function mapProxyCheck(data, requestedIp = null) {
+  const ip = requestedIp || Object.keys(data || {}).find((key) => key !== 'status' && key !== 'query_time');
+  const entry = ip ? data[ip] || {} : {};
+  const network = entry.network || {};
+  const location = entry.location || {};
+  const detections = entry.detections || {};
+  const deviceEstimate = entry.device_estimate || {};
+  let riskScore = typeof detections.risk === 'number' ? detections.risk : parseNumber(detections.risk);
+  if (riskScore === null) {
+    riskScore =
+      detections.compromised || detections.scraper
+        ? 100
+        : detections.proxy || detections.vpn || detections.tor || detections.anonymous
+          ? 80
+          : 0;
+  }
+  const sharedUsersMax =
+    typeof deviceEstimate.address === 'number'
+      ? deviceEstimate.address
+      : typeof deviceEstimate.subnet === 'number'
+        ? deviceEstimate.subnet
+        : null;
+  const hosting = Boolean(detections.hosting) || /hosting|business|server|datacenter|data center|cloud/i.test(String(network.type || ''));
+
+  return {
+    source: 'proxycheck.io',
+    ip,
+    ipType: hosting ? 'hosting' : inferIpTypeFromText(network.provider, network.organisation, network.type),
+    countryCode: location.country_code || 'unknown',
+    regionName: location.country_name || location.region_name || 'unknown',
+    asn: network.asn || null,
+    isProxy: Boolean(detections.proxy || detections.anonymous),
+    isVpn: Boolean(detections.vpn),
+    isTor: Boolean(detections.tor),
+    isBlacklisted: Boolean(detections.compromised || detections.scraper),
+    riskScore,
+    ping0Purity: purityFromRiskScore(riskScore),
+    sharedUsers: sharedUsersMax ? `设备估计 ${sharedUsersMax}` : null,
+    sharedUsersMax,
+    confidence: typeof detections.confidence === 'number' ? detections.confidence : 35
+  };
+}
+
 function mapPing0Api(data) {
   const asn = data.asn ? String(data.asn).startsWith('AS') ? String(data.asn) : `AS${data.asn}` : null;
   const ipType = normalizePing0IpType(data);
@@ -394,6 +437,16 @@ async function mapPing0() {
   return mapPing0Api(data);
 }
 
+async function mapProxyCheckProvider() {
+  const ip = (await fetchText('https://api.ipify.org')).trim();
+  if (!ip) throw new Error('PROXYCHECK_IP_MISSING');
+  const key = String(process.env.PROXYCHECK_API_KEY || '').trim();
+  const url = new URL(`https://proxycheck.io/v3/${encodeURIComponent(ip)}`);
+  if (key) url.searchParams.set('key', key);
+  const data = await fetchJson(url.toString());
+  return mapProxyCheck(data, ip);
+}
+
 async function runFreeProviders() {
   const providers = [
     {
@@ -409,6 +462,12 @@ async function runFreeProviders() {
       run: async () => mapPing0()
     }
   ];
+  if (process.env.NETWORK_GUARD_USE_PROXYCHECK === '1' || String(process.env.PROXYCHECK_API_KEY || '').trim()) {
+    providers.push({
+      source: 'proxycheck.io',
+      run: async () => mapProxyCheckProvider()
+    });
+  }
 
   return Promise.all(
     providers.map(async (provider) => {
@@ -422,14 +481,12 @@ async function runFreeProviders() {
 }
 
 module.exports = {
-  getFetchImplementation,
-  fetchJson,
-  fetchText,
   runFreeProviders,
   providerError,
   inferIpTypeFromText,
   mapIpWhoIs,
   mapIpApi,
+  mapProxyCheck,
   mapPing0Api,
   parsePing0Html
 };

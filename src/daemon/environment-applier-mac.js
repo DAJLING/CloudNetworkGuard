@@ -339,8 +339,6 @@ module.exports = {
   EnvironmentApplierMac,
   BROWSER_REGISTRY,
   WEBRTC_POLICY,
-  parseSystemsetupTimeZone,
-  parseDefaultsArray,
   localeFromLanguage,
   stepResult
 };

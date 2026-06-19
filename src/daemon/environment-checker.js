@@ -69,7 +69,6 @@ function checkClientEnvironment(environment = {}) {
 }
 
 module.exports = {
-  BLOCKED_TIME_ZONES,
   BLOCKED_LANGUAGES,
   buildEnvironmentCheckInput,
   checkClientEnvironment

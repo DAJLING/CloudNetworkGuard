@@ -775,6 +775,8 @@ function runGuidanceAction(actionId) {
     els.applyEnvironmentConsistency.click();
   } else if (actionId === 'configure-static-ip' || actionId === 'skip-static-ip') {
     openStaticIpDialog();
+  } else if (actionId === 'open-ping0-verify') {
+    window.networkGuard.openPing0Verify();
   } else if (actionId === 'view-report' || actionId === 'review-binding') {
     setActiveView('report');
   }

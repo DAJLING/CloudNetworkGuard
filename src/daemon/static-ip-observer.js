@@ -61,7 +61,6 @@ function observeStaticIp({ currentIp, now = Date.now(), storeState, salt, static
 }
 
 module.exports = {
-  DEFAULT_STATIC_WINDOW_MS,
   hashIp,
   maskIp,
   observeStaticIp

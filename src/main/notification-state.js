@@ -45,6 +45,5 @@ class NotificationDeduper {
 
 module.exports = {
   NotificationDeduper,
-  getBlockingNotificationSignature,
-  normalizeReasons
+  getBlockingNotificationSignature
 };

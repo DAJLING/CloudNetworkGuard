@@ -395,8 +395,5 @@ class EnvironmentApplierWin {
 module.exports = {
   EnvironmentApplierWin,
   BROWSER_REGISTRY,
-  WEBRTC_POLICY,
-  execFileWithTimeout,
-  COMMAND_TIMEOUT_MS,
-  POWERSHELL_TIMEOUT_MS
+  WEBRTC_POLICY
 };

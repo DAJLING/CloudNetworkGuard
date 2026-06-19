@@ -26,11 +26,17 @@ test('renderer exposes fix guidance surface', () => {
   const html = readProjectFile('src/renderer/index.html');
   const renderer = readProjectFile('src/renderer/renderer.js');
   const service = readProjectFile('src/daemon/guard-service.js');
+  const preload = readProjectFile('src/main/preload.js');
+  const main = readProjectFile('src/main/main.js');
 
   assert.match(html, /id="fixTitle"/);
   assert.match(html, /id="fixExplanation"/);
   assert.match(html, /id="fixActions"/);
   assert.match(renderer, /renderGuidance\(status\.guidance/);
+  assert.match(renderer, /open-ping0-verify/);
+  assert.match(renderer, /networkGuard\.openPing0Verify\(\)/);
+  assert.match(preload, /openPing0Verify: \(\) => ipcRenderer\.invoke\('guard:open-ping0-verify'\)/);
+  assert.match(main, /shell\.openExternal\('https:\/\/ping0\.cc'\)/);
   assert.match(service, /getTopReasonGuidance/);
 });
 

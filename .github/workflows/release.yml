@@ -21,6 +21,10 @@ jobs:
             os: macos-latest
           - platform: windows
             os: windows-latest
+    env:
+      npm_config_registry: https://registry.npmjs.org/
+      npm_config_electron_mirror: https://github.com/electron/electron/releases/download/
+      ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/
 
     steps:
       - name: Checkout

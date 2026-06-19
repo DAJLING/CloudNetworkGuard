@@ -107,6 +107,28 @@ pnpm run dist:win:msi   # MSI installer, requires WiX on the build machine
 
 `pnpm run make-icon` creates the Windows icon asset used by installer builds. macOS and Windows builds are intentionally separate so each platform only produces its own artifacts under `dist/`.
 
+## GitHub Releases
+
+This repository includes a GitHub Actions workflow that builds Windows and macOS installers whenever a `v*` tag is pushed.
+
+To publish the first public installer release:
+
+```bash
+git tag v0.0.2
+git push origin v0.0.2
+```
+
+The workflow will:
+
+- install dependencies with pnpm,
+- run the test suite,
+- build macOS `.dmg` and `.pkg` installers,
+- build Windows `.exe` and `.msi` installers,
+- create or update the GitHub Release for the tag,
+- upload the installer files as release assets.
+
+Current release artifacts are unsigned. macOS Gatekeeper and Windows SmartScreen may warn users until Apple notarization and Windows code signing are configured.
+
 ## Target Configuration
 
 Guarded Claude targets are loaded from `target-rules.json` in the app data directory. Set `NETWORK_GUARD_TARGET_CONFIG` to point at another file. The Targets view can add, edit, delete, reload, reset, and save target rules without manually editing JSON.

@@ -19,7 +19,7 @@ test('Electron build config declares platform app icons', () => {
 test('test script is portable on Windows shells', () => {
   const packageJson = JSON.parse(readProjectFile('package.json'));
 
-  assert.equal(packageJson.scripts.test, 'node --test tests/**/*.test.js');
+  assert.equal(packageJson.scripts.test, 'node --test tests/*.test.js');
 });
 
 test('main process uses bundled icon assets for windows and tray', () => {

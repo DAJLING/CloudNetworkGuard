@@ -1512,6 +1512,11 @@ window.networkGuard.onEvent((event) => {
     runPostApplyCheck().catch(() => {});
     return;
   }
+  if (event.type === 'open-report') {
+    if (event.status) render(event.status);
+    setActiveView('report');
+    return;
+  }
   if (event.type === 'guard-enable-failed') {
     setHelp('开启守卫前网络校验未通过，守卫未开启。请查看检测清单中的失败项。', 'error');
   }

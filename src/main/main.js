@@ -1,5 +1,5 @@
 const path = require('path');
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, Notification, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, Notification, dialog, shell } = require('electron');
 const { GuardService } = require('../daemon/guard-service');
 const { GuardState } = require('../shared/constants');
 const { NotificationDeduper } = require('./notification-state');
@@ -103,6 +103,15 @@ function broadcastStatus() {
   }
 }
 
+function runAfterMainWindowLoad(callback) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.webContents.isLoading()) {
+    mainWindow.webContents.once('did-finish-load', callback);
+    return;
+  }
+  callback();
+}
+
 function attentionPulse() {
   if (process.platform === 'darwin' && app.dock && typeof app.dock.bounce === 'function') {
     app.dock.bounce('critical');
@@ -155,6 +164,86 @@ function reasonLabels() {
 function formatReasons(reasons = []) {
   const labels = reasonLabels();
   return reasons.length ? reasons.map((reason) => labels[reason] || reason).join(', ') : 'UNKNOWN';
+}
+
+function shouldReuseNoStaticIpRiskAcceptance(status = {}) {
+  const staticResidentialIp =
+    status.targetConfig && status.targetConfig.staticResidentialIp
+      ? String(status.targetConfig.staticResidentialIp).trim()
+      : '';
+  return Boolean(status.claudeRiskAcceptedAt || staticResidentialIp === '0.0.0.0');
+}
+
+function shouldShowStartupGuardAlert(status = {}, error = null) {
+  if (error) return true;
+  if (!status || status.guardState !== GuardState.ENABLED) return true;
+  const check = status.lastCheck;
+  return !check || check.allowTargetTraffic !== true;
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+  if (mainWindow) {
+    mainWindow.show();
+    mainWindow.focus();
+  }
+}
+
+async function showStartupGuardAlert(status = {}, error = null) {
+  showMainWindow();
+  attentionPulse();
+
+  const check = status.lastCheck || {};
+  const guidance = status.guidance || {};
+  const reasonText = error ? error.message || 'STARTUP_GUARD_FAILED' : formatReasons(check.reasons || []);
+  const title =
+    status.guardState === GuardState.ENABLED
+      ? '开机防护已启动，但 Claude 流量暂被阻断'
+      : '开机防护未能开启';
+  const message =
+    guidance.title && status.guardState === GuardState.ENABLED
+      ? `${guidance.title}\n\n${reasonText}`
+      : `Claude Network Guard 开机后自动检测未通过。\n\n${reasonText}`;
+
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    title,
+    message,
+    detail: '守卫会保持谨慎保护。请查看检测报告或修复建议后重新检测。',
+    buttons: ['查看检测报告', '知道了'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true
+  });
+
+  if (result.response === 0 && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('guard:event', { type: 'open-report', status: service.getStatus() });
+  }
+}
+
+async function runStartupGuardCheck() {
+  const initialStatus = service.getStatus();
+  const shouldAutoEnable = initialStatus.launchAtLogin === true || initialStatus.guardState === GuardState.ENABLED;
+  if (!shouldAutoEnable) return;
+
+  try {
+    const status = await service.enableGuard(undefined, {
+      acceptNoStaticIpRisk: shouldReuseNoStaticIpRiskAcceptance(initialStatus)
+    });
+    updateTray();
+    broadcastStatus();
+
+    if (initialStatus.launchAtLogin === true && shouldShowStartupGuardAlert(status)) {
+      await showStartupGuardAlert(status);
+    }
+  } catch (error) {
+    const status = service.getStatus();
+    updateTray();
+    broadcastStatus();
+    if (initialStatus.launchAtLogin === true) {
+      await showStartupGuardAlert(status, error);
+    }
+  }
 }
 
 function notifyBlockedRequest(event) {
@@ -323,14 +412,14 @@ app.whenReady().then(async () => {
         pendingPostApplyCheck: false
       }
     });
-    mainWindow.webContents.once('did-finish-load', () => {
+    runAfterMainWindowLoad(() => {
       mainWindow.webContents.send('guard:event', { type: 'post-apply-check' });
     });
   }
 
-  if (service.getStatus().guardState === GuardState.ENABLED) {
-    service.enableGuard().catch(() => {});
-  }
+  runAfterMainWindowLoad(() => {
+    runStartupGuardCheck().catch(() => {});
+  });
 });
 
 app.on('activate', () => {

@@ -197,6 +197,22 @@ test('renderer explains request-time validation replaces periodic monitoring', (
   assert.match(renderer, /定时检测已停用/);
 });
 
+test('main process auto-checks and strongly alerts on launch-at-login guard failures', () => {
+  const html = readProjectFile('src/renderer/index.html');
+  const renderer = readProjectFile('src/renderer/renderer.js');
+  const main = readProjectFile('src/main/main.js');
+
+  assert.match(html, /启动后自动检测并开启守卫/);
+  assert.match(main, /runStartupGuardCheck/);
+  assert.match(main, /initialStatus\.launchAtLogin === true/);
+  assert.match(main, /service\.enableGuard\(undefined, \{/);
+  assert.match(main, /acceptNoStaticIpRisk: shouldReuseNoStaticIpRiskAcceptance/);
+  assert.match(main, /dialog\.showMessageBox/);
+  assert.match(main, /开机防护已启动，但 Claude 流量暂被阻断/);
+  assert.match(renderer, /event\.type === 'open-report'/);
+  assert.match(renderer, /setActiveView\('report'\)/);
+});
+
 test('README documents macOS pf firewall fallback', () => {
   const readme = readProjectFile('README.md');
 

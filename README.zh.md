@@ -107,6 +107,28 @@ pnpm run dist:win:msi   # MSI 安装包，需要构建机安装 WiX
 
 `pnpm run make-icon` 会生成 Windows 安装包使用的图标资源。macOS 与 Windows 构建命令故意分开，避免跨平台产物混在一起。
 
+## GitHub Releases
+
+仓库已经加入 GitHub Actions 工作流：推送 `v*` tag 后会自动构建 Windows 和 macOS 安装包，并上传到对应的 GitHub Release。
+
+发布第一个公开安装包版本：
+
+```bash
+git tag v0.0.2
+git push origin v0.0.2
+```
+
+工作流会自动完成：
+
+- 使用 pnpm 安装依赖；
+- 运行测试；
+- 构建 macOS `.dmg` 和 `.pkg` 安装包；
+- 构建 Windows `.exe` 和 `.msi` 安装包；
+- 为该 tag 创建或更新 GitHub Release；
+- 将安装包作为 release assets 上传。
+
+当前发布产物未签名。配置 Apple notarization 和 Windows code signing 之前，macOS Gatekeeper 与 Windows SmartScreen 可能会向用户展示安全提示。
+
 ## 目标配置
 
 守卫目标从应用数据目录中的 `target-rules.json` 读取。你也可以通过 `NETWORK_GUARD_TARGET_CONFIG` 指向另一个文件。Targets view 可以新增、编辑、删除、重新载入、重置并保存目标规则，不需要手动编辑 JSON。
